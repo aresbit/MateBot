@@ -36,21 +36,24 @@ uv pip install -e .
 
 ### 1. Create Telegram bot
 
-Message [@BotFather](https://t.me/BotFather), create bot, get token.
-
-### 2. Configure hook
+Bot receives your messages and sends Claude's responses back.
 
 ```bash
-# Copy hook script
+# Message @BotFather on Telegram, create bot, get token
+```
+
+### 2. Configure Stop hook
+
+Hook triggers when Claude finishes responding, reads transcript, sends to Telegram.
+
+```bash
 cp hooks/send-to-telegram.sh ~/.claude/hooks/
-
-# Edit token in the script
-nano ~/.claude/hooks/send-to-telegram.sh
-
-# Make executable
+nano ~/.claude/hooks/send-to-telegram.sh  # set your bot token
 chmod +x ~/.claude/hooks/send-to-telegram.sh
+```
 
-# Add to ~/.claude/settings.json
+Add to `~/.claude/settings.json`:
+```json
 {
   "hooks": {
     "Stop": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/send-to-telegram.sh"}]}]
@@ -60,12 +63,16 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 
 ### 3. Start tmux + Claude
 
+tmux keeps Claude Code running persistently; bridge injects messages via `send-keys`.
+
 ```bash
 tmux new -s claude
 claude --dangerously-skip-permissions
 ```
 
 ### 4. Run bridge
+
+Bridge receives Telegram webhooks and injects messages into Claude Code.
 
 ```bash
 export TELEGRAM_BOT_TOKEN="your_token"
@@ -74,11 +81,15 @@ python bridge.py
 
 ### 5. Expose via Cloudflare Tunnel
 
+Tunnel exposes local bridge to the internet so Telegram can reach it.
+
 ```bash
 cloudflared tunnel --url http://localhost:8080
 ```
 
 ### 6. Set webhook
+
+Tells Telegram where to send message updates.
 
 ```bash
 curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=https://YOUR-TUNNEL-URL.trycloudflare.com"
