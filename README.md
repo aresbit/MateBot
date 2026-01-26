@@ -81,6 +81,7 @@ claude --dangerously-skip-permissions
 Bridge receives Telegram messages and injects them into Claude Code.
 
 **Webhook mode** (default): Uses HTTP webhooks via Cloudflare tunnel
+
 ```bash
 export TELEGRAM_BOT_TOKEN="your_token"
 python bridge.py --mode webhook
@@ -88,6 +89,7 @@ python bridge.py --mode webhook
 ```
 
 **Polling mode**: Direct polling of Telegram API (no tunnel needed)
+
 ```bash
 export TELEGRAM_BOT_TOKEN="your_token"
 python bridge.py --mode polling
@@ -118,21 +120,25 @@ curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=https://Y
 ### Webhook Mode (Default)
 
 Pros:
+
 - Real-time message delivery
 - Efficient (no polling overhead)
 
 Cons:
+
 - Requires Cloudflare tunnel or public URL
 - More complex setup
 
 ### Polling Mode
 
 Pros:
+
 - No tunnel required
 - Simpler setup
 - Works behind firewalls/NAT
 
 Cons:
+
 - Slight delay (up to 30 seconds) receiving messages
 - Uses more bandwidth
 
@@ -151,12 +157,12 @@ All commands work in both webhook and polling modes.
 
 ## Environment Variables
 
-| Variable               | Default    | Description              |
-| ---------------------- | ---------- | ------------------------ |
-| `TELEGRAM_BOT_TOKEN` | required   | Bot token from BotFather |
-| `TMUX_SESSION`       | `claude` | tmux session name        |
-| `PORT`               | `8081`   | Bridge port (webhook)    |
-| `BRIDGE_MODE`        | `webhook`| Default mode if --mode not set |
+| Variable               | Default     | Description                    |
+| ---------------------- | ----------- | ------------------------------ |
+| `TELEGRAM_BOT_TOKEN` | required    | Bot token from BotFather       |
+| `TMUX_SESSION`       | `claude`  | tmux session name              |
+| `PORT`               | `8081`    | Bridge port (webhook)          |
+| `BRIDGE_MODE`        | `webhook` | Default mode if --mode not set |
 
 ## Architecture
 
@@ -179,6 +185,7 @@ The Response Monitor is a new feature that actively monitors Claude's transcript
 ### Callback Support
 
 Both modes support inline keyboard callbacks (used by `/resume` command):
+
 - Resume specific session
 - Continue most recent session
 - Full error handling and retry logic
@@ -212,6 +219,9 @@ Both modes support inline keyboard callbacks (used by `/resume` command):
 3. Restart bridge
 
 ## 常见命令
+
     tmux a -t claude
     claude --dangerously-skip-permissions
     tmux kill-session -t claude
+    # 关闭所有 bridge 相关进程
+  pkill -f "bridge\.py|bridge-polling\.py"

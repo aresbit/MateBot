@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 TMUX_SESSION="claude"
-BRIDGE_PORT="8080"
+BRIDGE_PORT="8081"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 HOOKS_DIR="$HOME/.claude/hooks"
@@ -189,10 +189,11 @@ EOF
         print_success "Bot 命令已注册"
     fi
 
-    # Start bridge in background
+    # Start bridge in background with correct port
     # print_info "启动 bridge-polling.py (端口 $BRIDGE_PORT)..."
     # nohup python3 "$PROJECT_DIR/bridge-polling.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
     print_info "启动 bridge.py (端口 $BRIDGE_PORT)..."
+    export PORT="$BRIDGE_PORT"  # Ensure bridge uses the correct port
     nohup python3 "$PROJECT_DIR/bridge.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
     BRIDGE_PID=$!
     echo $BRIDGE_PID > "$PROJECT_DIR/bridge.pid"
