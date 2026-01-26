@@ -1,9 +1,16 @@
 [project]
 name = "claudecode-telegram"
-version = "0.1.0"
+version = "0.1.1"
 description = "Telegram bridge for Claude Code"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
 claudecode-telegram = "bridge:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false

@@ -61,9 +61,10 @@ check_prerequisites() {
         missing_deps+=("python3")
     fi
 
-    if ! command_exists pip; then
-        missing_deps+=("pip")
-    fi
+    # Skip pip check - not needed
+    # if ! command_exists pip; then
+    #     missing_deps+=("pip")
+    # fi
 
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_error "缺少依赖: ${missing_deps[*]}"
@@ -88,13 +89,14 @@ setup_venv() {
         print_success "虚拟环境已创建"
     fi
 
-    source "$VENV_DIR/bin/activate"
+    # source "$VENV_DIR/bin/activate"
 
-    if [ -f "$PROJECT_DIR/setup.py" ] || [ -f "$PROJECT_DIR/pyproject.toml" ]; then
-        print_info "安装 Python 依赖..."
-        pip install -e . >/dev/null 2>&1
-        print_success "Python 依赖已安装"
-    fi
+    # Skip pip install - bridge.py only uses standard libraries
+    # if [ -f "$PROJECT_DIR/setup.py" ] || [ -f "$PROJECT_DIR/pyproject.toml" ]; then
+    #     print_info "安装 Python 依赖..."
+    #     pip install -e . >/dev/null 2>&1
+    #     print_success "Python 依赖已安装"
+    # fi
 }
 
 # Setup Claude hooks
@@ -188,8 +190,10 @@ EOF
     fi
 
     # Start bridge in background
+    # print_info "启动 bridge-polling.py (端口 $BRIDGE_PORT)..."
+    # nohup python3 "$PROJECT_DIR/bridge-polling.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
     print_info "启动 bridge.py (端口 $BRIDGE_PORT)..."
-    nohup "$VENV_DIR/bin/python" "$PROJECT_DIR/bridge.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
+    nohup python3 "$PROJECT_DIR/bridge.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
     BRIDGE_PID=$!
     echo $BRIDGE_PID > "$PROJECT_DIR/bridge.pid"
 
@@ -454,6 +458,9 @@ main() {
         echo "  /loop      - Ralph 循环模式"
         echo "  /stop      - 中断 Claude"
     fi
+    echo " ===MateCode=== "
+    tmux a -t claude
+    claude --dangerously-skip-permissions
 }
 
 # Run main function
