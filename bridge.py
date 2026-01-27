@@ -8,6 +8,8 @@ import threading
 import time
 import urllib.request
 import argparse
+import socket
+import errno
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -38,23 +40,61 @@ BLOCKED_COMMANDS = [
 # ============ Common Utilities ============
 
 
-def telegram_api(method, data):
-    """Make a request to the Telegram Bot API."""
+def is_port_available(port, host='0.0.0.0'):
+    """Check if a port is available for binding."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            return True
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            return False
+        raise
+
+
+def find_available_port(start_port=8081, max_port=8099):
+    """Find an available port starting from start_port."""
+    for port in range(start_port, max_port + 1):
+        if is_port_available(port):
+            return port
+    return None
+
+
+def telegram_api(method, data, max_retries=3, base_delay=1.0):
+    """Make a request to the Telegram Bot API with retry logic."""
     if not BOT_TOKEN:
         print("Warning: TELEGRAM_BOT_TOKEN not set")
         return None
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     req = urllib.request.Request(
         url,
         data=json.dumps(data).encode() if data else None,
         headers={"Content-Type": "application/json"}
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
-    except Exception as e:
-        print(f"Telegram API error in {method}: {e}")
-        return None
+
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 502 and attempt < max_retries - 1:  # Bad Gateway
+                delay = base_delay * (2 ** attempt)
+                print(f"Telegram API error (502) in {method}, retrying in {delay}s...")
+                time.sleep(delay)
+                continue
+            print(f"Telegram API HTTP error in {method}: {e}")
+            return None
+        except Exception as e:
+            print(f"Telegram API error in {method}: {e}")
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"Retrying in {delay}s...")
+                time.sleep(delay)
+                continue
+            return None
+    return None
 
 
 def setup_bot_commands():
@@ -591,6 +631,17 @@ def run_webhook_mode(port):
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down webhook server...")
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            print(f"\nError: Port {port} is already in use!")
+            available_port = find_available_port(port + 1)
+            if available_port:
+                print(f"\nAlternative port available: {available_port}")
+                print(f"To use it, run: python3 bridge.py --port {available_port}")
+            else:
+                print("\nNo alternative ports available in range 8081-8099")
+                print("Consider using polling mode: python3 bridge.py --mode polling")
+        raise
     finally:
         response_monitor.stop()
 
@@ -625,14 +676,48 @@ Environment Variables:
         default=int(os.environ.get("PORT", "8081")),
         help="Port for webhook mode (default: 8081)"
     )
+    parser.add_argument(
+        "--force-polling",
+        action="store_true",
+        help="Force polling mode (overrides --mode)"
+    )
     args = parser.parse_args()
 
     if not BOT_TOKEN:
         print("Error: TELEGRAM_BOT_TOKEN not set")
         return 1
 
+    # Handle force polling mode
+    if args.force_polling:
+        print("Force polling mode enabled via --force-polling")
+        handler = PollingHandler()
+        handler.poll_updates()
+        return 0
+
+    # Check port availability if webhook mode
     if args.mode == "webhook":
-        run_webhook_mode(args.port)
+        if not is_port_available(args.port):
+            print(f"\nError: Port {args.port} is already in use!")
+            available_port = find_available_port(args.port + 1)
+            if available_port:
+                print(f"\nAlternative port available: {available_port}")
+                print(f"To use it, run: python3 bridge.py --port {available_port}")
+            else:
+                print("\nNo alternative ports available in range 8081-8099")
+                print("Falling back to polling mode...")
+                handler = PollingHandler()
+                handler.poll_updates()
+                return 0
+
+        try:
+            run_webhook_mode(args.port)
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                print(f"\nPort conflict detected, falling back to polling mode...")
+                handler = PollingHandler()
+                handler.poll_updates()
+                return 0
+            raise
     else:
         handler = PollingHandler()
         handler.poll_updates()

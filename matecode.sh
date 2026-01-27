@@ -20,6 +20,8 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 HOOKS_DIR="$HOME/.claude/hooks"
 SETTINGS_FILE="$HOME/.claude/settings.json"
+POLLING_MODE=false
+FORCE_POLLING=false
 
 # Print colored message
 print_success() {
@@ -165,9 +167,57 @@ start_tmux_claude() {
     fi
 }
 
+# Check port availability
+check_port() {
+    local port=$1
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import socket
+import sys
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+result = sock.connect_ex(('127.0.0.1', $port))
+sock.close()
+sys.exit(0 if result != 0 else 1)
+" 2>/dev/null
+        return $?
+    else
+        # Fallback to netstat/ss
+        if command -v netstat >/dev/null 2>&1; then
+            ! netstat -tuln 2>/dev/null | grep -q ":$port "
+        elif command -v ss >/dev/null 2>&1; then
+            ! ss -tuln 2>/dev/null | grep -q ":$port "
+        else
+            # Can't check, assume available
+            return 0
+        fi
+    fi
+}
+
 # Start bridge server
 start_bridge() {
     print_info "启动 Bridge 服务器..."
+
+    # Check if port is available
+    if [ "$POLLING_MODE" = false ] && ! check_port "$BRIDGE_PORT"; then
+        print_error "端口 $BRIDGE_PORT 已被占用"
+        print_info "尝试查找可用端口..."
+
+        # Try to find an alternative port
+        found_port=false
+        for alt_port in $(seq $((BRIDGE_PORT + 1)) 8099); do
+            if check_port "$alt_port"; then
+                print_info "找到可用端口: $alt_port"
+                BRIDGE_PORT=$alt_port
+                found_port=true
+                break
+            fi
+        done
+
+        if [ "$found_port" = false ]; then
+            print_warning "未找到可用端口 (8081-8099)，将使用轮询模式"
+            POLLING_MODE=true
+        fi
+    fi
 
     # Register bot commands
     if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
@@ -189,19 +239,34 @@ EOF
         print_success "Bot 命令已注册"
     fi
 
-    # Start bridge in background with correct port
-    # print_info "启动 bridge-polling.py (端口 $BRIDGE_PORT)..."
-    # nohup python3 "$PROJECT_DIR/bridge-polling.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
+    # Start bridge in background
     print_info "启动 bridge.py (端口 $BRIDGE_PORT)..."
     export PORT="$BRIDGE_PORT"  # Ensure bridge uses the correct port
-    nohup python3 "$PROJECT_DIR/bridge.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
+
+    if [ "$POLLING_MODE" = true ] || [ "$FORCE_POLLING" = true ]; then
+        print_info "使用轮询模式 (无 Cloudflare Tunnel)..."
+        nohup python3 "$PROJECT_DIR/bridge.py" --mode polling >"$PROJECT_DIR/bridge.log" 2>&1 &
+    else
+        nohup python3 "$PROJECT_DIR/bridge.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
+    fi
+
     BRIDGE_PID=$!
     echo $BRIDGE_PID > "$PROJECT_DIR/bridge.pid"
 
-    sleep 2
+    sleep 3
 
     if kill -0 $BRIDGE_PID 2>/dev/null; then
         print_success "Bridge 服务器已启动 (PID: $BRIDGE_PID)"
+
+        # Check if bridge encountered port issues and check the log
+        sleep 2
+        if grep -q "Error: Port" "$PROJECT_DIR/bridge.log" 2>/dev/null; then
+            print_warning "检测到端口问题，检查日志..."
+            if grep -q "Falling back to polling mode" "$PROJECT_DIR/bridge.log" 2>/dev/null; then
+                print_success "Bridge 已自动切换到轮询模式"
+                POLLING_MODE=true
+            fi
+        fi
     else
         print_error "Bridge 启动失败，请查看 bridge.log"
         exit 1
@@ -210,6 +275,12 @@ EOF
 
 # Start Cloudflare tunnel
 start_tunnel() {
+    # Skip tunnel if in polling mode
+    if [ "$POLLING_MODE" = true ] || [ "$FORCE_POLLING" = true ]; then
+        print_info "轮询模式已启用，跳过 Cloudflare Tunnel"
+        return 0
+    fi
+
     print_info "启动 Cloudflare Tunnel..."
 
     # Start tunnel in background
@@ -241,6 +312,7 @@ start_tunnel() {
             print_success "Telegram webhook 已设置"
         else
             print_warning "Webhook 设置可能失败: $RESPONSE"
+            print_warning "将使用轮询模式作为备用方案"
         fi
     fi
 }
@@ -262,12 +334,19 @@ show_status() {
     # Check bridge
     if [ -f "$PROJECT_DIR/bridge.pid" ] && kill -0 "$(cat "$PROJECT_DIR/bridge.pid")" 2>/dev/null; then
         print_success "Bridge 正在运行 (PID: $(cat "$PROJECT_DIR/bridge.pid"))"
+        if [ "$POLLING_MODE" = true ] || [ "$FORCE_POLLING" = true ]; then
+            print_info "模式: 轮询模式 (无 Cloudflare Tunnel)"
+        else
+            print_info "模式: Webhook 模式"
+        fi
     else
         print_error "Bridge 未运行"
     fi
 
     # Check tunnel
-    if [ -f "$PROJECT_DIR/tunnel.pid" ] && kill -0 "$(cat "$PROJECT_DIR/tunnel.pid")" 2>/dev/null; then
+    if [ "$POLLING_MODE" = true ] || [ "$FORCE_POLLING" = true ]; then
+        print_info "Cloudflare Tunnel: 已跳过 (轮询模式)"
+    elif [ -f "$PROJECT_DIR/tunnel.pid" ] && kill -0 "$(cat "$PROJECT_DIR/tunnel.pid")" 2>/dev/null; then
         if [ -f "$PROJECT_DIR/tunnel.url" ]; then
             print_success "Tunnel 正在运行: $(cat "$PROJECT_DIR/tunnel.url")"
         else
@@ -315,6 +394,8 @@ stop_services() {
     fi
 
     rm -f "$PROJECT_DIR/tunnel.url"
+    # Reset polling mode flag
+    POLLING_MODE=false
 }
 
 # Show logs
@@ -347,7 +428,7 @@ show_logs() {
 # Show usage
 usage() {
     cat << EOF
-使用方法: ./start.sh [选项]
+使用方法: ./matecode.sh [选项]
 
 选项:
     start      启动所有服务 (默认)
@@ -355,26 +436,34 @@ usage() {
     restart    重启所有服务
     status     显示服务状态
     logs       查看日志
+    --polling  强制使用轮询模式（无需 Cloudflare）
     --help     显示帮助信息
 
 环境变量:
     TELEGRAM_BOT_TOKEN    Telegram Bot Token (必需)
     TMUX_SESSION          tmux 会话名称 (可选, 默认: claude)
-    PORT                  Bridge 端口 (可选, 默认: 8080)
+    PORT                  Bridge 端口 (可选, 默认: 8081)
 
 示例:
     export TELEGRAM_BOT_TOKEN="your_token_here"
-    ./start.sh start
+    ./matecode.sh start
 
     # 或使用一次性环境变量
-    TELEGRAM_BOT_TOKEN="your_token" ./start.sh start
+    TELEGRAM_BOT_TOKEN="your_token" ./matecode.sh start
+
+    # 使用轮询模式（无需 Cloudflare Tunnel）
+    ./matecode.sh start --polling
 
 快速开始:
     1. 获取 Telegram Bot Token (从 @BotFather)
     2. export TELEGRAM_BOT_TOKEN="your_token"
-    3. ./start.sh start
-    4. 查看状态: ./start.sh status
+    3. ./matecode.sh start
+    4. 查看状态: ./matecode.sh status
     5. 在 Telegram 中开始使用
+
+模式说明:
+    Webhook 模式: 需要 Cloudflare Tunnel，响应更快
+    轮询模式: 无需 Cloudflare，但响应稍慢
 
 EOF
 }
@@ -400,6 +489,12 @@ main() {
 
     case "${1:-start}" in
         start)
+            # Check for --polling flag
+            if [ "$2" = "--polling" ]; then
+                FORCE_POLLING=true
+                POLLING_MODE=true
+                print_info "使用轮询模式（无需 Cloudflare Tunnel）"
+            fi
             check_prerequisites
             setup_venv
             setup_claude_hooks
@@ -414,6 +509,12 @@ main() {
         restart)
             stop_services
             sleep 2
+            # Check for --polling flag
+            if [ "$2" = "--polling" ]; then
+                FORCE_POLLING=true
+                POLLING_MODE=true
+                print_info "使用轮询模式（无需 Cloudflare Tunnel）"
+            fi
             check_prerequisites
             setup_venv
             setup_claude_hooks
@@ -463,6 +564,13 @@ main() {
     tmux a -t claude
     claude --dangerously-skip-permissions
 }
+
+# Check for --polling flag before main function
+if [ "$1" = "--polling" ]; then
+    FORCE_POLLING=true
+    POLLING_MODE=true
+    shift
+fi
 
 # Run main function
 main "$@"
