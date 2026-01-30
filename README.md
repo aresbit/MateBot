@@ -93,6 +93,7 @@ export MEMORY_MAX_CONTEXT=2000    # 注入上下文的最大字符数
 ## 常见命令
 
     tmux a -t claude
+    tmux source-file ~/.tmux.conf
     claude --dangerously-skip-permissions
     tmux kill-session -t claude
     # 关闭所有 bridge 相关进程

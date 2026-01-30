@@ -38,46 +38,25 @@ fi
 # Install oh-my-tmux if not present
 if [ ! -d "$HOME/.tmux" ]; then
     print_info "Installing oh-my-tmux..."
-    git clone --depth 1 https://github.com/gpakosz/.tmux.git ~/.tmux
+    #git clone --depth 1 https://github.com/gpakosz/.tmux.git ~/.tmux
     ln -sf ~/.tmux/.tmux.conf ~/.tmux.conf
     print_success "oh-my-tmux installed"
 else
     print_info "Updating oh-my-tmux..."
-    cd ~/.tmux && git pull origin master
+    #cd ~/.tmux && git pull origin master
 fi
 
 # Copy MateBot configuration
-PROJECT_DIR="/home/yangpt/yyscode/MateBot"
+PROJECT_DIR=${PWD}
 if [ -f "$PROJECT_DIR/.tmux.conf.local" ]; then
     print_info "Installing MateBot configuration..."
-    cp "$PROJECT_DIR/.tmux.conf.local" ~/.tmux.conf.local
+    cp "$PROJECT_DIR/.tmux.conf.local" ~/.tmux/.tmux.conf
     print_success "Configuration installed"
     print_info "Copied from: $PROJECT_DIR/.tmux.conf.local"
-    print_info "Copied to: $HOME/.tmux.conf.local"
+    print_info "Copied to: $HOME/.tmux.conf"
 else
     print_error "MateBot config not found at $PROJECT_DIR/.tmux.conf.local"
     exit 1
-fi
-
-# Verify installation
-echo ""
-print_info "Verifying installation..."
-
-# Test configuration syntax
-if tmux source-file ~/.tmux.conf.local 2>/dev/null; then
-    print_success "Configuration syntax is valid"
-else
-    print_error "Configuration has syntax errors"
-    exit 1
-fi
-
-# Check key settings
-if grep -q "set -g mouse on" ~/.tmux.conf.local; then
-    print_success "Mouse support configured"
-fi
-
-if grep -q "history-limit 50000" ~/.tmux.conf.local; then
-    print_success "History limit set to 50000"
 fi
 
 echo ""

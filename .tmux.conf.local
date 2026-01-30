@@ -51,8 +51,8 @@ bind -n M-5 select-window -t 5
 bind y set-window-option synchronize-panes\; display-message "pane sync #{?pane_synchronized,on,off}"
 
 # Custom split bindings (using standard prefix)
-bind % split-window -h -c "#{pane_current_path}"
-bind '"' split-window -v -c "#{pane_current_path}"
+bind % split-window -h -c '#{pane_current_path}'
+bind '-' split-window -v -c '#{pane_current_path}'
 
 # Clear history
 bind C-l send-keys C-l \; clear-history \; display-message "history cleared"
