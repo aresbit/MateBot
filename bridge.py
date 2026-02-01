@@ -339,6 +339,7 @@ def extract_assistant_responses(transcript_path, last_response_pos=0):
         return "", 0
 
     responses = []
+    seen_message_ids = set()  # Track processed message IDs to avoid duplicates
     current_pos = 0
 
     try:
@@ -351,9 +352,25 @@ def extract_assistant_responses(transcript_path, last_response_pos=0):
                 entry = json.loads(line.strip())
                 if entry.get("type") == "assistant":
                     message = entry.get("message", {})
+                    msg_id = message.get("id")
+
+                    # Skip if we've already processed this message ID
+                    if msg_id and msg_id in seen_message_ids:
+                        continue
+
+                    # Extract only text blocks (skip thinking, tool_use, etc.)
+                    text_content = []
                     for block in message.get("content", []):
                         if block.get("type") == "text":
-                            responses.append(block.get("text", ""))
+                            text = block.get("text", "").strip()
+                            # Skip XML observation blocks and empty text
+                            if text and not (text.startswith("<") and ">" in text):
+                                text_content.append(text)
+
+                    if text_content:
+                        if msg_id:
+                            seen_message_ids.add(msg_id)
+                        responses.append("\n".join(text_content))
     except (json.JSONDecodeError, KeyError):
         # Skip malformed lines
         pass
