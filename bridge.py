@@ -364,8 +364,15 @@ def extract_assistant_responses(transcript_path, last_response_pos=0):
                         if block.get("type") == "text":
                             text = block.get("text", "").strip()
                             # Skip XML observation blocks and empty text
-                            if text and not (text.startswith("<") and ">" in text):
-                                text_content.append(text)
+                            if not text:
+                                continue
+                            # Skip pure XML blocks
+                            if text.startswith("<") and ">" in text:
+                                continue
+                            # Skip markdown code blocks containing XML/observation
+                            if text.startswith("```") and ("</" in text or "observation" in text.lower()):
+                                continue
+                            text_content.append(text)
 
                     if text_content:
                         if msg_id:
