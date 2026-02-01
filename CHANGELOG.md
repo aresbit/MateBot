@@ -39,7 +39,6 @@ All notable changes to the MateBot project.
 - Default instruction auto-initialized to DB on first run
 - Instruction can be updated via `/remember` or auto-memory for iterative optimization
 - Automatic memory extraction on every Telegram message
-- ~~New `/metamem` command to view auto-saved memories~~ (removed in favor of `/recall`)
 
 ## [1.0.0] - 2025-01-31
 

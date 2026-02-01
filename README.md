@@ -76,7 +76,6 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 | `/remember <text>` | 保存内容到记忆 |
 | `/recall [query]` | 搜索/查看记忆 |
 | `/forget <query/all>` | 删除记忆 |
-| `/metamem` | 查看自动保存的记忆 |
 
 ### 记忆功能
 
@@ -86,7 +85,6 @@ MateCode 内置了基于 SQLite 的本地记忆系统：
 - **智能召回**：发送消息时自动搜索相关历史记忆并注入上下文
 - **隐私安全**：所有数据存储在本地 `~/.matecode/memory.db`，不上传云端
 - **手动管理**：使用 `/remember`、`/recall`、`/forget` 命令管理记忆
-- **查看自动记忆**：使用 `/metamem` 查看系统自动保存的关键信息
 
 **环境变量配置：**
 ```bash

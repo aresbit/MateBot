@@ -105,7 +105,6 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 | `/remember <内容>` | 手动保存内容到记忆 |
 | `/recall [关键词]` | 搜索/查看记忆 |
 | `/forget <关键词/all>` | 删除记忆（all=清空所有）|
-| `/metamem` | 查看自动保存的记忆 |
 
 ---
 

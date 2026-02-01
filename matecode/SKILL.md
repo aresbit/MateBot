@@ -84,7 +84,6 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 | `/continue_` | 继续最近会话 |
 | `/resume` | 选择会话恢复 |
 | `/stop` | 中断 Claude |
-| `/metamem` | 查看自动保存的记忆 |
 
 ## 故障排查
 
