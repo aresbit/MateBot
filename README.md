@@ -72,20 +72,21 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 | `/clear` | 清空对话 |
 | `/continue_` | 继续最近会话 |
 | `/resume` | 选择会话恢复 |
-| `/loop <prompt>` | Ralph 循环模式 |
 | `/stop` | 中断 Claude |
 | `/remember <text>` | 保存内容到记忆 |
 | `/recall [query]` | 搜索/查看记忆 |
 | `/forget <query/all>` | 删除记忆 |
+| `/metamem` | 查看自动保存的记忆 |
 
 ### 记忆功能
 
 MateCode 内置了基于 SQLite 的本地记忆系统：
 
-- **自动记忆**：每次对话自动保存到本地数据库
+- **完全自动**：每条消息自动提取关键信息保存到记忆，无需手动触发
 - **智能召回**：发送消息时自动搜索相关历史记忆并注入上下文
 - **隐私安全**：所有数据存储在本地 `~/.matecode/memory.db`，不上传云端
 - **手动管理**：使用 `/remember`、`/recall`、`/forget` 命令管理记忆
+- **查看自动记忆**：使用 `/metamem` 查看系统自动保存的关键信息
 
 **环境变量配置：**
 ```bash

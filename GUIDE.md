@@ -101,11 +101,11 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 | `/clear` | 清空对话 |
 | `/continue_` | 继续最近会话 |
 | `/resume` | 选择会话恢复 |
-| `/loop <提示词>` | Ralph 循环模式 |
 | `/stop` | 中断 Claude |
 | `/remember <内容>` | 手动保存内容到记忆 |
 | `/recall [关键词]` | 搜索/查看记忆 |
 | `/forget <关键词/all>` | 删除记忆（all=清空所有）|
+| `/metamem` | 查看自动保存的记忆 |
 
 ---
 

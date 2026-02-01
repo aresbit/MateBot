@@ -162,8 +162,8 @@ class LocalMemory:
                     return False
 
                 rowid = row[0]
-                conn.execute("DELETE FROM memories WHERE id = ? AND user_id = ?", (memory_id, user_id))
                 conn.execute("DELETE FROM memory_search WHERE rowid = ?", (rowid,))
+                conn.execute("DELETE FROM memories WHERE id = ? AND user_id = ?", (memory_id, user_id))
                 conn.commit()
             return True
         except sqlite3.Error as e:
@@ -182,9 +182,10 @@ class LocalMemory:
                 cursor = conn.execute("SELECT rowid FROM memories WHERE user_id = ?", (user_id,))
                 rowids = [row[0] for row in cursor.fetchall()]
 
-                conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
                 for rowid in rowids:
                     conn.execute("DELETE FROM memory_search WHERE rowid = ?", (rowid,))
+
+                conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
                 conn.commit()
             return True
         except sqlite3.Error as e:

@@ -24,18 +24,42 @@ MEMORY_ENABLED = os.environ.get("MEMORY_ENABLED", "true").lower() == "true"
 MEMORY_MAX_RESULTS = int(os.environ.get("MEMORY_MAX_RESULTS", "5"))
 MEMORY_MAX_CONTEXT = int(os.environ.get("MEMORY_MAX_CONTEXT", "2000"))
 
+DEFAULT_AUTO_MEMORY_INSTRUCTION = """【记忆模式 - 系统编程优化版】
+
+仅在以下场景触发记忆（避免无意义内容）：
+- 架构决策、API设计、性能优化
+- Bug发现及修复方案
+- 引入新依赖/工具/技术栈
+- 安全/并发/内存管理相关
+
+格式 (-- memory 块会自动过滤，用户不可见)：
+-- memory
+ctx  = 项目上下文或文件路径
+type = decision|bug|perf|security|api|tool|refactor
+key  = 关键信息（一句话摘要）
+--
+
+多行值缩进示例：
+-- memory
+ctx  = src/memory.py
+type = bugfix
+key  = FTS5删除顺序错误，需先删索引再删主表
+     = 原因是 content_rowid=rowid 的外键约束
+--
+
+无记忆内容时输出空标记：
+-- memory
+--"""
+
 BOT_COMMANDS = [
     {"command": "clear", "description": "Clear conversation"},
     {"command": "resume", "description": "Resume session (shows picker)"},
     {"command": "continue_", "description": "Continue most recent session"},
-    {"command": "loop", "description": "Ralph Loop: /loop <prompt>"},
-    {"command": "meta_loop", "description": "Meta Loop with auto-memory: /meta_loop <prompt>"},
     {"command": "stop", "description": "Interrupt Claude (Escape)"},
     {"command": "status", "description": "Check tmux status"},
     {"command": "remember", "description": "Save to memory: /remember <text>"},
     {"command": "recall", "description": "Search memories: /recall <query>"},
     {"command": "forget", "description": "Delete memory: /forget <query>"},
-    {"command": "metamem", "description": "View meta-update memories"},
 ]
 
 BLOCKED_COMMANDS = {
@@ -96,8 +120,6 @@ def reply(chat_id, text):
     telegram_api("sendMessage", {"chat_id": chat_id, "text": text})
 
 
-# ============ Tmux Functions ============
-
 def tmux_exists():
     """Check if tmux session exists."""
     return subprocess.run(
@@ -124,8 +146,6 @@ def tmux_send_escape():
     """Send Escape key to tmux."""
     subprocess.run(["tmux", "send-keys", "-t", TMUX_SESSION, "Escape"])
 
-
-# ============ CLAUDE.md Loader ============
 
 def load_claude_md() -> str:
     """Load .CLAUDE.md from project or home directory."""
@@ -161,19 +181,17 @@ def extract_meta_prompt(claude_md_content: str) -> str:
 
 
 def extract_memory_update(response: str) -> tuple[str, str]:
-    """Extract memory update from Claude's response."""
-    pattern = r"<memory_update>(.*?)</memory_update>"
+    """Extract memory update from Claude's response using CCL-style format."""
+    pattern = r"--\s*memory\s*\n(.*?)\n--"
     match = re.search(pattern, response, re.DOTALL)
 
     if match:
         memory_content = match.group(1).strip()
-        cleaned_response = re.sub(pattern, "", response, flags=re.DOTALL).strip()
+        cleaned_response = re.sub(pattern + r"\s*", "", response, flags=re.DOTALL).strip()
         return cleaned_response, memory_content
 
     return response, ""
 
-
-# ============ Session Management ============
 
 def get_recent_sessions(limit=5):
     """Get list of recent Claude sessions."""
@@ -207,16 +225,26 @@ def get_session_id(project_path):
     return None
 
 
-# ============ Response Monitor ============
-
 def find_latest_transcript():
     """Find the most recent Claude transcript file."""
-    transcripts_dir = Path.home() / ".claude" / "transcripts"
-    if not transcripts_dir.exists():
-        return None
+    search_paths = [
+        Path.home() / ".claude" / "transcripts",
+        Path.home() / ".claude" / "projects",
+    ]
 
-    transcript_files = list(transcripts_dir.glob("*.jsonl"))
-    return max(transcript_files, key=lambda p: p.stat().st_mtime) if transcript_files else None
+    all_transcripts = []
+
+    for path in search_paths:
+        if not path.exists():
+            continue
+        if path.name == "projects":
+            for project_dir in path.iterdir():
+                if project_dir.is_dir():
+                    all_transcripts.extend(project_dir.glob("*.jsonl"))
+        else:
+            all_transcripts.extend(path.glob("*.jsonl"))
+
+    return max(all_transcripts, key=lambda p: p.stat().st_mtime) if all_transcripts else None
 
 
 def extract_assistant_responses(transcript_path, last_response_pos=0):
@@ -327,31 +355,32 @@ class ResponseMonitor:
 
     def _save_to_memory(self, chat_id, cleaned_responses, memory_update):
         """Save conversation to memory."""
-        if not MEMORY_ENABLED or str(chat_id) not in recent_messages:
+        if not MEMORY_ENABLED:
             return
 
         try:
-            user_msg = recent_messages[str(chat_id)]
             memory = get_memory()
+            chat_id_str = str(chat_id)
 
-            memory.add(
-                str(chat_id),
-                f"Q: {user_msg}\nA: {cleaned_responses[:2000]}",
-                metadata={"type": "conversation"}
-            )
-            print(f"Saved conversation to memory for {chat_id}")
+            if chat_id_str in recent_messages:
+                user_msg = recent_messages[chat_id_str]
+                memory.add(
+                    chat_id_str,
+                    f"Q: {user_msg}\nA: {cleaned_responses[:2000]}",
+                    metadata={"type": "conversation"}
+                )
+                print(f"Saved conversation to memory for {chat_id}")
+                recent_messages.pop(chat_id_str, None)
+                recent_full_prompts.pop(chat_id_str, None)
 
             if memory_update:
                 memory.add(
-                    str(chat_id),
+                    chat_id_str,
                     memory_update[:5000],
                     metadata={"type": "meta_update", "auto": True},
                     message_type="meta_update"
                 )
                 print(f"Saved meta-update to memory for {chat_id}")
-
-            recent_messages.pop(str(chat_id), None)
-            recent_full_prompts.pop(str(chat_id), None)
 
         except Exception as e:
             print(f"Error saving to memory: {e}")
@@ -360,26 +389,12 @@ class ResponseMonitor:
 response_monitor = ResponseMonitor()
 
 
-# ============ Bot Handler ============
-
 class BotHandler:
     """Handle Telegram bot updates."""
 
-    META_LOOP_INSTRUCTION = """
-【自我涉指协议】
-这是递归自我涉指模式。你需要：
-1. 完成用户的请求
-2. 分析本轮交互中的关键信息和学习点
-3. 在回复末尾使用 <memory_update> 标签输出更新后的系统提示词
-
-格式：
-<memory_update>
-[更新后的完整提示词内容]
-</memory_update>
-"""
-
     def __init__(self):
         self.offset = self._load_offset()
+        self._session_initialized = False
 
     def _load_offset(self):
         """Load update offset from file."""
@@ -409,9 +424,35 @@ class BotHandler:
             f.write(str(int(time.time())))
         threading.Thread(target=send_typing_loop, args=(chat_id,), daemon=True).start()
 
-    def _build_full_prompt(self, text, chat_id):
-        """Build full prompt with memory context and meta-prompt."""
+    def _get_or_init_auto_memory_instruction(self) -> str:
+        """Get auto-memory instruction from DB, initialize if not exists."""
+        if not MEMORY_ENABLED:
+            return DEFAULT_AUTO_MEMORY_INSTRUCTION
+
+        try:
+            memory = get_memory()
+            results = memory.get_by_type("system", "meta_instruction", limit=1)
+            if results:
+                return results[0]["content"]
+
+            memory.add(
+                "system",
+                DEFAULT_AUTO_MEMORY_INSTRUCTION,
+                metadata={"type": "self_referential", "auto": False},
+                message_type="meta_instruction"
+            )
+            print("Initialized self-referential meta-instruction in DB")
+            return DEFAULT_AUTO_MEMORY_INSTRUCTION
+        except Exception as e:
+            print(f"Error loading meta-instruction: {e}")
+            return DEFAULT_AUTO_MEMORY_INSTRUCTION
+
+    def _build_full_prompt(self, text, chat_id, is_new_session=False):
+        """Build full prompt with memory context, meta-prompt, and auto-memory instruction."""
         prompt_parts = []
+
+        instruction = self._get_or_init_auto_memory_instruction()
+        prompt_parts.append(instruction)
 
         if MEMORY_ENABLED:
             try:
@@ -425,11 +466,13 @@ class BotHandler:
             except Exception as e:
                 print(f"Memory search error: {e}")
 
-        claude_md_content = load_claude_md()
-        meta_prompt = extract_meta_prompt(claude_md_content)
-        if meta_prompt:
-            prompt_parts.append(f"【系统指令】\n{meta_prompt}")
-            print(f"Injected CLAUDE.md meta-prompt ({len(meta_prompt)} chars)")
+        if is_new_session or not hasattr(self, '_session_initialized'):
+            claude_md_content = load_claude_md()
+            meta_prompt = extract_meta_prompt(claude_md_content)
+            if meta_prompt:
+                prompt_parts.append(f"【系统指令】\n{meta_prompt}")
+                print(f"Injected CLAUDE.md meta-prompt ({len(meta_prompt)} chars)")
+            self._session_initialized = True
 
         if prompt_parts:
             return "\n\n---\n\n".join(prompt_parts) + f"\n\n---\n\n{text}"
@@ -444,15 +487,12 @@ class BotHandler:
         if not text or not chat_id:
             return
 
-        # Save chat ID for hook script
         with open(CHAT_ID_FILE, "w") as f:
             f.write(str(chat_id))
 
-        # Handle commands
         if text.startswith("/"):
             return self._handle_command(text, chat_id)
 
-        # Regular message
         print(f"[{chat_id}] {text[:50]}...")
 
         full_prompt = self._build_full_prompt(text, chat_id)
@@ -490,14 +530,11 @@ class BotHandler:
             "/stop": self._cmd_stop,
             "/clear": self._cmd_clear,
             "/continue_": self._cmd_continue,
-            "/loop": self._cmd_loop,
-            "/meta_loop": self._cmd_meta_loop,
             "/resume": self._cmd_resume,
             "/remember": self._cmd_remember,
             "/recall": self._cmd_recall,
             "/forget": self._cmd_forget,
             "/memstats": self._cmd_memstats,
-            "/metamem": self._cmd_metamem,
         }
 
         if cmd in handlers:
@@ -519,6 +556,7 @@ class BotHandler:
     def _cmd_clear(self, chat_id, _):
         if not self._require_tmux(chat_id):
             return
+        self._session_initialized = False
         tmux_send_escape()
         time.sleep(0.2)
         tmux_send("/clear")
@@ -528,6 +566,7 @@ class BotHandler:
     def _cmd_continue(self, chat_id, _):
         if not self._require_tmux(chat_id):
             return
+        self._session_initialized = False
         tmux_send_escape()
         time.sleep(0.2)
         tmux_send("/exit")
@@ -537,47 +576,8 @@ class BotHandler:
         tmux_send_enter()
         reply(chat_id, "Continuing...")
 
-    def _cmd_loop(self, chat_id, args):
-        if not self._require_tmux(chat_id):
-            return
-        if not args:
-            reply(chat_id, "Usage: /loop <prompt>")
-            return
-
-        prompt = args.replace('"', '\\"')
-        full = f'{prompt} Output <promise>DONE</promise> when complete.'
-
-        self._start_typing(chat_id)
-        tmux_send(f'/ralph-loop:ralph-loop "{full}" --max-iterations 5 --completion-promise "DONE"')
-        time.sleep(0.3)
-        tmux_send_enter()
-        reply(chat_id, "Ralph Loop started (max 5 iterations)")
-
-    def _cmd_meta_loop(self, chat_id, args):
-        if not self._require_tmux(chat_id):
-            return
-        if not args:
-            reply(chat_id, "Usage: /meta_loop <prompt>")
-            return
-
-        claude_md_content = load_claude_md()
-        meta_prompt = extract_meta_prompt(claude_md_content)
-
-        if meta_prompt:
-            full_prompt = f"【系统角色】\n{meta_prompt}\n\n{self.META_LOOP_INSTRUCTION}\n\n---\n\n用户请求: {args}\n\n请完成任务并输出记忆更新。"
-        else:
-            full_prompt = f"{self.META_LOOP_INSTRUCTION}\n\n---\n\n用户请求: {args}\n\n请完成任务并输出记忆更新。"
-
-        full_prompt_escaped = full_prompt.replace('"', '\\"')
-
-        self._start_typing(chat_id)
-        loop_prompt = f'{full_prompt_escaped} Output <promise>DONE</promise> when complete.'
-        tmux_send(f'/ralph-loop:ralph-loop "{loop_prompt}" --max-iterations 5 --completion-promise "DONE"')
-        time.sleep(0.3)
-        tmux_send_enter()
-        reply(chat_id, "Meta Loop started (auto-memory enabled, max 5 iterations)")
-
     def _cmd_resume(self, chat_id, _):
+        self._session_initialized = False
         sessions = get_recent_sessions()
         if not sessions:
             reply(chat_id, "No sessions")
@@ -654,23 +654,6 @@ class BotHandler:
             f"Oldest: {stats['oldest'] or 'N/A'}\n"
             f"By type:\n{type_info or '  N/A'}")
 
-    def _cmd_metamem(self, chat_id, _):
-        memory = get_memory()
-        results = memory.get_by_type(str(chat_id), "meta_update", limit=5)
-
-        if not results:
-            reply(chat_id, "No meta-update memories found")
-            return
-
-        lines = ["🔄 Meta-Update Memories (Self-Referential):", ""]
-        for i, mem in enumerate(results, 1):
-            content = mem["content"][:150]
-            if len(mem["content"]) > 150:
-                content += "..."
-            lines.append(f"{i}. [{mem['timestamp']}] {content}")
-
-        reply(chat_id, "\n".join(lines))
-
     def handle_callback_query(self, callback_query):
         """Process callback queries (inline button clicks)."""
         query_id = callback_query.get("id")
@@ -689,6 +672,7 @@ class BotHandler:
 
         try:
             if data.startswith("resume:"):
+                self._session_initialized = False
                 session_id = data.split(":", 1)[1]
                 tmux_send_escape()
                 time.sleep(0.2)
@@ -699,6 +683,7 @@ class BotHandler:
                 tmux_send_enter()
                 reply(chat_id, f"Resuming: {session_id[:8]}...")
             elif data == "continue_recent":
+                self._session_initialized = False
                 tmux_send_escape()
                 time.sleep(0.2)
                 tmux_send("/exit")

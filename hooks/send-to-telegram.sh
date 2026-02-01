@@ -37,6 +37,11 @@ with open(tmpfile) as f:
 if not text or text == "null":
     sys.exit(0)
 
+# Extract and remove memory block (CCL-style format) before sending
+memory_pattern = r'--\s*memory\s*\n(.*?)\n--'
+if re.search(memory_pattern, text, re.DOTALL):
+    text = re.sub(memory_pattern, '', text, flags=re.DOTALL).strip()
+
 if len(text) > 4000:
     text = text[:4000] + "\n..."
 
