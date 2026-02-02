@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from memory import get_memory
+from attention_manager import AttentionManager, StablePromptBuilder
+from failure_memory import get_failure_memory
 
 
 class Config:
@@ -32,6 +34,10 @@ class Config:
     MEMORY_MAX_RESULTS = int(os.environ.get("MEMORY_MAX_RESULTS", "5"))
     MEMORY_MAX_CONTEXT = int(os.environ.get("MEMORY_MAX_CONTEXT", "2000"))
 
+    # KV-Cache settings
+    KV_CACHE_ENABLED = os.environ.get("KV_CACHE_ENABLED", "true").lower() == "true"
+    KV_CACHE_TTL = int(os.environ.get("KV_CACHE_TTL", "3600"))  # 1 hour default
+
     # Bot commands
     BOT_COMMANDS = [
         {"command": "clear", "description": "Clear conversation"},
@@ -42,6 +48,11 @@ class Config:
         {"command": "remember", "description": "Save to memory: /remember <text>"},
         {"command": "recall", "description": "Search memories: /recall <query>"},
         {"command": "forget", "description": "Delete memory: /forget <query>"},
+        {"command": "task", "description": "Manage tasks: /task [goal]"},
+        {"command": "todo", "description": "View/update todo: /todo [update]"},
+        {"command": "failures", "description": "View failure lessons: /failures [stats|resolve ID]"},
+        {"command": "lessons", "description": "View learned lessons: /lessons [query]"},
+        {"command": "kvcache", "description": "KV-Cache statistics: /kvcache [clear]"},
     ]
 
     BLOCKED_COMMANDS = {
@@ -494,8 +505,50 @@ class ResponseMonitor:
                     message_type="meta_update"
                 )
 
+            # Record failures if lesson extracted or error detected
+            self._record_failures_if_any(chat_id_str, cleaned_responses)
+
         except Exception as e:
             print(f"Error saving to memory: {e}")
+
+    def _record_failures_if_any(self, chat_id_str: str, response: str):
+        """记录失败经验（如果响应中包含教训或错误）"""
+        try:
+            failure_memory = get_failure_memory()
+
+            # 获取用户输入（如果有）
+            user_msg = recent_messages.get(chat_id_str)
+            if not user_msg:
+                return
+
+            # 尝试提取教训
+            lesson = failure_memory.extract_lesson_from_response(response)
+            if lesson:
+                # 记录失败，用户输入作为 action，response 作为 error_message
+                failure_memory.record_failure(
+                    user_id=chat_id_str,
+                    action=user_msg[:100],  # 截取前100字符作为action
+                    error_message=response[:500],  # 截取前500字符作为错误信息
+                    context=f"用户输入: {user_msg[:200]}",
+                    lesson=lesson
+                )
+                print(f"Recorded failure lesson for user {chat_id_str}")
+                return
+
+            # 如果没有明确教训，但检测到错误关键词，也记录
+            error_keywords = ["错误", "失败", "bug", "error", "exception", "failed", "invalid", "cannot", "unable"]
+            if any(keyword in response.lower() for keyword in error_keywords):
+                failure_memory.record_failure(
+                    user_id=chat_id_str,
+                    action=user_msg[:100],
+                    error_message=response[:500],
+                    context=f"用户输入: {user_msg[:200]}",
+                    lesson="检测到错误关键词，建议手动总结教训"
+                )
+                print(f"Recorded failure based on error keywords for user {chat_id_str}")
+
+        except Exception as e:
+            print(f"Error recording failure: {e}")
 
 
 response_monitor = ResponseMonitor()
@@ -507,6 +560,8 @@ class BotHandler:
     def __init__(self):
         self.offset = self._load_offset()
         self._session_initialized = False
+        self._attention_manager = AttentionManager()
+        self._prompt_builder = StablePromptBuilder(self._attention_manager)
 
     def _load_offset(self):
         """Load update offset from file."""
@@ -559,30 +614,55 @@ class BotHandler:
             return Config.DEFAULT_AUTO_MEMORY_INSTRUCTION
 
     def _build_full_prompt(self, text, chat_id, is_new_session=False):
-        """Build full prompt with memory context, meta-prompt, and auto-memory instruction."""
-        prompt_parts = []
+        """Build full prompt with AttentionManager for KV-Cache optimization.
 
+        Implements Manus-style attention redirection:
+        - Static prefix (cacheable)
+        - Retrieved memories + working memory
+        - User input
+        - Task state at the END (recency bias for goal focus)
+        """
+        # Prepare memories
+        memories = None
         if Config.MEMORY_ENABLED:
             try:
                 memory = get_memory()
                 memories = memory.search(str(chat_id), text, limit=Config.MEMORY_MAX_RESULTS)
-                if memories:
-                    memory_text = memory.format_for_prompt(memories, max_chars=Config.MEMORY_MAX_CONTEXT)
-                    if memory_text:
-                        prompt_parts.append(memory_text)
             except Exception as e:
                 print(f"Memory search error: {e}")
 
-        if is_new_session or not hasattr(self, '_session_initialized'):
+        # Get meta prompt for new sessions
+        claude_md_content = None
+        include_meta = is_new_session or not self._session_initialized
+        if include_meta:
             claude_md_content = load_claude_md()
-            meta_prompt = extract_meta_prompt(claude_md_content)
-            if meta_prompt:
-                prompt_parts.append(f"【系统指令】\n{meta_prompt}")
             self._session_initialized = True
 
-        if prompt_parts:
-            return "\n\n---\n\n".join(prompt_parts) + f"\n\n---\n\n{text}"
-        return text
+        # Build optimized prompt using AttentionManager
+        if Config.KV_CACHE_ENABLED:
+            # Use KV-Cache enabled prompt builder
+            full_prompt, cache_info = self._attention_manager.build_optimized_prompt_with_cache(
+                user_input=text,
+                chat_id=str(chat_id),
+                memories=memories,
+                include_meta_prompt=include_meta,
+                claude_md_content=claude_md_content,
+                ttl_seconds=Config.KV_CACHE_TTL,
+            )
+            # Optionally log cache info for debugging
+            if cache_info.get("cache_hit"):
+                print(f"[KV-Cache] Hit for chat {chat_id}, key: {cache_info.get('cache_key', 'unknown')}")
+        else:
+            # Original method (backward compatibility)
+            full_prompt = self._attention_manager.build_optimized_prompt(
+                user_input=text,
+                chat_id=str(chat_id),
+                memories=memories,
+                include_meta_prompt=include_meta,
+                claude_md_content=claude_md_content,
+            )
+
+        return full_prompt
 
     def handle_message(self, msg):
         """Process incoming message from Telegram."""
@@ -641,6 +721,11 @@ class BotHandler:
             "/recall": self._cmd_recall,
             "/forget": self._cmd_forget,
             "/memstats": self._cmd_memstats,
+            "/task": self._cmd_task,
+            "/todo": self._cmd_todo,
+            "/failures": self._cmd_failures,
+            "/lessons": self._cmd_lessons,
+            "/kvcache": self._cmd_kvcache,
         }
 
         if cmd in handlers:
@@ -770,6 +855,205 @@ class BotHandler:
             f"Newest: {stats['newest'] or 'N/A'}\n"
             f"Oldest: {stats['oldest'] or 'N/A'}\n"
             f"By type:\n{type_info or '  N/A'}")
+
+    def _cmd_task(self, chat_id, args):
+        """Create or manage tasks with todo.md tracking."""
+        if args:
+            # Create new task
+            task_id = self._attention_manager.create_task(str(chat_id), args)
+            reply(chat_id,
+                f"🎯 Task created!\n"
+                f"Goal: {args}\n"
+                f"Task ID: {task_id}\n\n"
+                f"The task goal will be appended to every prompt.\n"
+                f"Use /todo to view or update progress.")
+        else:
+            # Show current task
+            tasks = self._attention_manager._external.list_tasks(str(chat_id))
+            if not tasks:
+                reply(chat_id, "No active tasks. Create one with /task \u003cgoal\u003e")
+                return
+
+            lines = ["🎯 Active Tasks:", ""]
+            for t in tasks[:5]:
+                task_name = t['task_id'].replace('_todo.md', '').replace('_', ' ')
+                lines.append(f"• {task_name}")
+
+            current = self._attention_manager.get_task_id(str(chat_id))
+            lines.append(f"\nCurrent: {current}")
+            reply(chat_id, "\n".join(lines))
+
+    def _cmd_todo(self, chat_id, args):
+        """View or update todo.md for current task."""
+        if args:
+            # Update todo.md
+            task_id = self._attention_manager.get_task_id(str(chat_id))
+            if self._attention_manager._external.update_todo_md(
+                str(chat_id), args, task_id, append=True
+            ):
+                reply(chat_id, "✅ Todo updated")
+            else:
+                reply(chat_id, "❌ Failed to update")
+        else:
+            # Show current todo
+            task_id = self._attention_manager.get_task_id(str(chat_id))
+            todo = self._attention_manager._external.get_todo_md(str(chat_id), task_id)
+
+            if not todo or todo.startswith("# 当前任务目标"):
+                reply(chat_id, "No active todo. Create a task first with /task \u003cgoal\u003e")
+                return
+
+            # Truncate if too long
+            if len(todo) > 3000:
+                todo = todo[:3000] + "\n\n... (truncated)"
+
+            reply(chat_id, f"📝 Current Todo ({task_id}):\n\n{todo}")
+
+    def _cmd_failures(self, chat_id, args):
+        """View failure lessons or mark as resolved"""
+        try:
+            fm = get_failure_memory()
+            chat_id_str = str(chat_id)
+
+            if not args:
+                # Show failure stats and recent unresolved failures
+                stats = fm.get_stats(chat_id_str)
+                failures = fm.get_user_failures(chat_id_str, resolved_only=False, limit=5)
+
+                lines = [
+                    "📊 失败经验统计",
+                    f"总计: {stats['total_unique']} 个独立失败",
+                    f"已解决: {stats['resolved']}，未解决: {stats['unresolved']}",
+                    f"总发生次数: {stats['total_occurrences']}",
+                    f"平均重复: {stats['avg_recurrence']:.1f} 次/失败",
+                    "",
+                    "📝 最近的未解决失败:",
+                ]
+
+                if failures:
+                    for i, f in enumerate(failures, 1):
+                        lines.append(f"{i}. {f.action[:50]}")
+                        lines.append(f"   错误: {f.error_message[:80]}")
+                        if f.recurrence_count > 1:
+                            lines.append(f"   重复: {f.recurrence_count} 次")
+                        lines.append(f"   ID: {f.failure_id[:8]}")
+                        lines.append("")
+                else:
+                    lines.append("暂无未解决失败")
+
+                lines.append("\n使用 /failures stats 查看详细统计")
+                lines.append("使用 /failures resolve <ID> 标记为已解决")
+                reply(chat_id, "\n".join(lines))
+                return
+
+            args_lower = args.lower().strip()
+            if args_lower == "stats":
+                stats = fm.get_stats(chat_id_str)
+                lines = ["📊 失败经验详细统计", ""]
+                for key, value in stats.items():
+                    if key == "by_type":
+                        lines.append("按错误类型分类:")
+                        for err_type, count in value.items():
+                            lines.append(f"  {err_type}: {count}")
+                    else:
+                        lines.append(f"{key}: {value}")
+                reply(chat_id, "\n".join(lines))
+                return
+
+            if args_lower.startswith("resolve "):
+                failure_id = args_lower[8:].strip()
+                if fm.mark_resolved(chat_id_str, failure_id):
+                    reply(chat_id, f"✅ 失败记录 {failure_id[:8]} 标记为已解决")
+                else:
+                    reply(chat_id, f"❌ 未找到失败记录 {failure_id[:8]}")
+                return
+
+            # If query provided, search failures
+            failures = fm.get_user_failures(chat_id_str, resolved_only=False, limit=20)
+            filtered = [f for f in failures if args.lower() in f.action.lower() or args.lower() in f.error_message.lower()]
+            if not filtered:
+                reply(chat_id, f"未找到包含 '{args}' 的失败记录")
+                return
+
+            lines = [f"🔍 找到 {len(filtered)} 个相关失败:", ""]
+            for i, f in enumerate(filtered[:5], 1):
+                lines.append(f"{i}. {f.action[:60]}")
+                lines.append(f"   错误: {f.error_message[:80]}")
+                if f.lesson and f.lesson != "待总结":
+                    lines.append(f"   教训: {f.lesson[:80]}")
+                lines.append(f"   ID: {f.failure_id[:8]}")
+                lines.append("")
+            if len(filtered) > 5:
+                lines.append(f"... 还有 {len(filtered)-5} 个未显示")
+            reply(chat_id, "\n".join(lines))
+
+        except Exception as e:
+            print(f"Error handling /failures: {e}")
+            reply(chat_id, f"❌ 处理失败记录时出错: {e}")
+
+    def _cmd_lessons(self, chat_id, args):
+        """View learned lessons from failures"""
+        try:
+            fm = get_failure_memory()
+            chat_id_str = str(chat_id)
+
+            failures = fm.get_user_failures(chat_id_str, resolved_only=False, limit=50)
+            # Filter failures with meaningful lessons
+            lessons = [f for f in failures if f.lesson and f.lesson != "待总结"]
+
+            if args:
+                query = args.lower()
+                lessons = [f for f in lessons if query in f.lesson.lower() or query in f.action.lower()]
+
+            if not lessons:
+                reply(chat_id, f"📭 暂无已总结的教训{f' (查询: {args})' if args else ''}")
+                return
+
+            lines = [f"📚 学到的教训 ({len(lessons)} 个):", ""]
+            for i, f in enumerate(lessons[:10], 1):
+                lines.append(f"{i}. 【{f.action[:50]}】")
+                lines.append(f"   教训: {f.lesson[:100]}")
+                if f.recurrence_count > 1:
+                    lines.append(f"   (重复 {f.recurrence_count} 次)")
+                lines.append("")
+
+            if len(lessons) > 10:
+                lines.append(f"... 还有 {len(lessons)-10} 个未显示")
+            reply(chat_id, "\n".join(lines))
+
+        except Exception as e:
+            print(f"Error handling /lessons: {e}")
+            reply(chat_id, f"❌ 处理教训记录时出错: {e}")
+
+    def _cmd_kvcache(self, chat_id, args):
+        """Display KV-Cache statistics or clear cache"""
+        try:
+            stats = self._attention_manager.get_cache_stats()
+
+            if args.strip().lower() == "clear":
+                # Clear cache
+                cleared = self._attention_manager._kv_cache.clear_cache()
+                reply(chat_id, f"🗑️ 已清除 {cleared} 个缓存条目")
+                return
+
+            # Display statistics
+            lines = [
+                "🔧 KV-Cache 统计信息",
+                f"命中率: {stats['hit_rate']:.1%}",
+                f"总查询: {stats['total_queries']}",
+                f"命中: {stats['hit_count']}",
+                f"未命中: {stats['miss_count']}",
+                f"缓存条目: {stats['cache_size']}",
+                f"缓存目录: {stats['cache_dir']}",
+                "",
+                "使用 /kvcache clear 清除缓存"
+            ]
+
+            reply(chat_id, "\n".join(lines))
+
+        except Exception as e:
+            print(f"Error handling /kvcache: {e}")
+            reply(chat_id, f"❌ 处理KV-Cache统计时出错: {e}")
 
     def handle_callback_query(self, callback_query):
         """Process callback queries (inline button clicks)."""

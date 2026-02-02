@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Local Memory System for MateCode - SQLite-based long-term memory"""
+"""Local Memory System for MateCode - SQLite-based long-term memory
+
+Integrated with ExternalMemory for tiered storage:
+- Small content (<500 chars): stored directly in SQLite
+- Large content (>500 chars): stored in file system, reference in SQLite
+"""
 
 import hashlib
 import json
@@ -9,7 +14,11 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
+
+# Import ExternalMemory for tiered storage
+from external_memory import get_external_memory, ExternalMemoryRef
 
 
 MEMORY_DIR = os.path.expanduser("~/.matecode")
@@ -17,14 +26,28 @@ MEMORY_DB = os.path.join(MEMORY_DIR, "memory.db")
 
 
 class LocalMemory:
-    """Local SQLite-based memory storage with FTS5 search."""
+    """Local SQLite-based memory storage with FTS5 search.
+
+    Tiered storage architecture:
+    - Tier 1 (Working): Recent conversation context in memory
+    - Tier 2 (Short-term): SQLite for quick access memories
+    - Tier 3 (External): File system for large content via ExternalMemory
+    """
 
     MAX_CONTENT_LENGTH = 10000
     DEFAULT_MESSAGE_TYPE = "conversation"
 
+    # Threshold for external storage
+    EXTERNAL_STORAGE_THRESHOLD = 500
+
     def __init__(self, db_path: str = MEMORY_DB):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # Only create directory for file-based databases
+        if db_path != ":memory:":
+            db_dir = os.path.dirname(db_path)
+            if db_dir:  # Ensure db_dir is not empty
+                os.makedirs(db_dir, exist_ok=True)
+        self._external = get_external_memory()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -78,11 +101,31 @@ class LocalMemory:
 
     def add(self, user_id: str, content: str, metadata: Optional[Dict[str, Any]] = None,
             message_type: str = DEFAULT_MESSAGE_TYPE) -> bool:
-        """Add a memory entry."""
+        """Add a memory entry with tiered storage.
+
+        - Content < 500 chars: stored directly in SQLite
+        - Content >= 500 chars: stored in file system, reference in SQLite
+        """
         if not content or not content.strip():
             return False
 
-        content = content.strip()[:self.MAX_CONTENT_LENGTH]
+        content = content.strip()
+
+        # Check if content should be stored externally (Manus: restorable compression)
+        external_ref = None
+        if len(content) >= self.EXTERNAL_STORAGE_THRESHOLD:
+            compressed, ref = self._external.compress_for_memory(
+                user_id, content, message_type, metadata
+            )
+            if ref:
+                content = compressed
+                external_ref = ref
+                # Add external ref info to metadata
+                if metadata is None:
+                    metadata = {}
+                metadata = {**metadata, "_external_ref": ref.ref_id, "_is_external": True}
+
+        content = content[:self.MAX_CONTENT_LENGTH]
         memory_id = self._generate_id(user_id, content)
         metadata_json = json.dumps(metadata) if metadata else None
 
@@ -239,16 +282,51 @@ class LocalMemory:
         words = [w for w in query.split() if len(w) >= 2]
         return " AND ".join(f"{word}*" for word in words) if words else ""
 
-    def format_for_prompt(self, memories: List[Dict], max_chars: int = 2000) -> str:
-        """Format memories for injection into Claude prompt."""
+    def _expand_external_refs(self, memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Expand external references in memories when needed."""
+        expanded = []
+        for mem in memories:
+            metadata = mem.get("metadata") or {}
+            if metadata.get("_is_external") and metadata.get("_external_ref"):
+                # Store reference info but keep compact for display
+                mem["_external_ref_id"] = metadata["_external_ref"]
+                mem["_has_full_content"] = True
+            expanded.append(mem)
+        return expanded
+
+    def get_full_content(self, memory: Dict[str, Any]) -> Optional[str]:
+        """Retrieve full content for a memory with external reference."""
+        ref_id = memory.get("_external_ref_id")
+        if ref_id:
+            return self._external.retrieve_content(ref_id)
+        return memory.get("content")
+
+    def format_for_prompt(self, memories: List[Dict], max_chars: int = 2000, expand_external: bool = False) -> str:
+        """Format memories for injection into Claude prompt.
+
+        Args:
+            memories: List of memory dicts
+            max_chars: Maximum characters in output
+            expand_external: If True, expand external references to full content
+        """
         if not memories:
             return ""
+
+        memories = self._expand_external_refs(memories)
 
         lines = ["【历史记忆】", ""]
         current_len = len("【历史记忆】\n\n")
 
         for mem in memories:
-            content = mem["content"].replace("\n", " ")
+            content = mem["content"]
+
+            # Optionally expand external references
+            if expand_external and mem.get("_has_full_content"):
+                full = self.get_full_content(mem)
+                if full:
+                    content = full
+
+            content = content.replace("\n", " ")
             line = f"• {content}"
 
             if current_len + len(line) + 1 > max_chars:
@@ -258,6 +336,22 @@ class LocalMemory:
             current_len += len(line) + 1
 
         return "\n".join(lines)
+
+    # =========================================================================
+    # Todo.md Integration - Attention Redirection
+    # =========================================================================
+
+    def get_todo_md(self, user_id: str, task_id: str = "default") -> str:
+        """Get current task todo.md for attention redirection (Manus pattern)."""
+        return self._external.get_todo_md(user_id, task_id)
+
+    def update_todo_md(self, user_id: str, content: str, task_id: str = "default", append: bool = False) -> bool:
+        """Update todo.md to keep goals front-of-mind."""
+        return self._external.update_todo_md(user_id, content, task_id, append)
+
+    def list_active_tasks(self, user_id: str) -> List[Dict[str, Any]]:
+        """List all active task todos for a user."""
+        return self._external.list_tasks(user_id)
 
 
 _memory_instance: Optional[LocalMemory] = None
