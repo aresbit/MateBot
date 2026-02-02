@@ -1,0 +1,49 @@
+image: ocaml/opam:debian-ocaml-{{OCAML_VERSION}}
+
+variables:
+  OPAMYES: "1"
+  OPAMCONFIRMLEVEL: "unsafe-yes"
+
+stages:
+  - build
+  - test
+  - doc
+
+before_script:
+  - opam init --bare -a || true
+  - opam switch create . ocaml.{{OCAML_VERSION}} --no-install || opam switch .
+  - eval $(opam env)
+
+install:
+  stage: build
+  script:
+    - opam install . --deps-only --with-test --with-doc
+  cache:
+    key: opam-$CI_COMMIT_REF_SLUG
+    paths:
+      - _opam/
+
+build:
+  stage: build
+  script:
+    - opam exec -- dune build
+  needs:
+    - install
+
+test:
+  stage: test
+  script:
+    - opam exec -- dune runtest --verbose
+  needs:
+    - build
+
+documentation:
+  stage: doc
+  script:
+    - opam exec -- dune build @doc
+  needs:
+    - build
+  artifacts:
+    paths:
+      - _build/default/_doc/_html/
+    expire_in: 1 week

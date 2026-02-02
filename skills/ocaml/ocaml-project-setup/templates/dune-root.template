@@ -1,0 +1,4 @@
+; Root dune configuration
+
+; Ignore third-party sources fetched for development reference
+(data_only_dirs third_party)

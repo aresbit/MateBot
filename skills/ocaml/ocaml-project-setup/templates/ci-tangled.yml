@@ -1,0 +1,59 @@
+when:
+  - event: ["push", "pull_request"]
+    branch: ["main"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - shell
+    - stdenv
+    - findutils
+    - binutils
+    - libunwind
+    - ncurses
+    - opam
+    - git
+    - gawk
+    - gnupatch
+    - gnum4
+    - gnumake
+    - gnutar
+    - gnused
+    - gnugrep
+    - diffutils
+    - gzip
+    - bzip2
+    - gcc
+    - ocaml
+    - pkg-config
+
+steps:
+  - name: opam
+    command: |
+      opam init --disable-sandboxing -a -y
+
+  - name: repo
+    command: |
+      opam repo add aoah https://tangled.org/anil.recoil.org/aoah-opam-repo.git
+
+  - name: deps
+    command: |
+      opam install . --confirm-level=unsafe-yes --deps-only
+
+  - name: build
+    command: |
+      opam exec -- dune build
+
+  - name: deps-test
+    command: |
+      opam install . --confirm-level=unsafe-yes --deps-only --with-test
+
+  - name: test
+    command: |
+      opam exec -- dune runtest --verbose
+
+  - name: doc
+    command: |
+      opam install -y odoc
+      opam exec -- dune build @doc

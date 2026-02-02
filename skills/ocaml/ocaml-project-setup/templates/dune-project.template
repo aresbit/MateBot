@@ -1,0 +1,31 @@
+(lang dune 3.21)
+
+(name {{PROJECT_NAME}})
+
+(generate_opam_files true)
+
+(license {{LICENSE}})
+
+(authors "{{AUTHOR_NAME}} <{{AUTHOR_EMAIL}}>")
+
+(maintainers "{{AUTHOR_NAME}} <{{AUTHOR_EMAIL}}>")
+
+(source
+ (github {{GIT_ORG}}/{{PROJECT_NAME_KEBAB}}))
+
+(documentation https://{{GIT_ORG}}.github.io/{{PROJECT_NAME_KEBAB}})
+
+(package
+ (name {{PROJECT_NAME}})
+ (synopsis "{{PROJECT_SYNOPSIS}}")
+ (description "{{PROJECT_DESCRIPTION}}")
+ (depends
+  (ocaml (>= {{OCAML_VERSION}}))
+  (alcotest (and :with-test (>= 1.7.0)))))
+
+; Uncomment for Tangled.org hosting:
+; (source (tangled {{GIT_ORG}}/{{PROJECT_NAME_KEBAB}}))
+
+; Uncomment for GitLab hosting:
+; (source
+;  (gitlab {{GIT_ORG}}/{{PROJECT_NAME_KEBAB}}))

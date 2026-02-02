@@ -1,0 +1,26 @@
+{
+  "name": "{{PROJECT_NAME_KEBAB}}-jsoo",
+  "version": "1.0.0",
+  "description": "{{PROJECT_SYNOPSIS}}",
+  "browser": "{{PROJECT_NAME}}.js",
+  "homepage": "{{GIT_URL}}",
+  "author": "{{AUTHOR_NAME}} <{{AUTHOR_EMAIL}}>",
+  "license": "{{LICENSE}}",
+  "repository": {
+    "type": "git",
+    "url": "{{GIT_URL}}#npm"
+  },
+  "keywords": [
+    "ocaml",
+    "js_of_ocaml",
+    "wasm",
+    "webassembly"
+  ],
+  "files": [
+    "{{PROJECT_NAME}}.js",
+    "{{PROJECT_NAME}}.wasm.js",
+    "{{PROJECT_NAME}}_js_main.bc.wasm.assets/",
+    "README.md",
+    "LICENSE"
+  ]
+}
