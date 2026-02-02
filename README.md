@@ -91,6 +91,8 @@ MateCode 内置了基于 SQLite 的本地记忆系统：
 export MEMORY_ENABLED=true        # 启用/禁用记忆功能
 export MEMORY_MAX_RESULTS=5       # 每次查询最大记忆数
 export MEMORY_MAX_CONTEXT=2000    # 注入上下文的最大字符数
+export TELEGRAM_RAW_MESSAGES=true # 发送原始消息（不添加系统提示头）
+export KV_CACHE_ENABLED=true      # 启用/禁用 KV-Cache 优化
 ```
 
 ## 常见命令
