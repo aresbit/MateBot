@@ -382,11 +382,14 @@ def extract_assistant_responses(transcript_path, last_response_pos=0, seen_messa
     """Extract assistant responses from transcript starting from a position.
 
     Uses incremental reading - only processes new lines since last_position.
-    Tracks seen message IDs across calls to avoid duplicates.
+    Tracks seen line positions to avoid duplicates (not message IDs, because
+    Claude transcript splits one message into multiple lines with different content types).
     """
     if not transcript_path or not transcript_path.exists():
         return "", 0, seen_message_ids or set()
 
+    # We use seen_positions to track which lines we've already processed
+    # This is more reliable than message IDs because one message can span multiple lines
     if seen_message_ids is None:
         seen_message_ids = set()
 
@@ -398,23 +401,40 @@ def extract_assistant_responses(transcript_path, last_response_pos=0, seen_messa
         with open(transcript_path, 'r') as f:
             lines = f.readlines()
 
-        for line in lines:
+        for line_idx, line in enumerate(lines):
+            line_start_pos = current_pos
             current_pos += len(line)
-            if current_pos <= last_response_pos:
+
+            # Skip lines we've already processed
+            if line_start_pos < last_response_pos:
+                continue
+
+            # Also skip if we've seen this exact line position before
+            line_pos_key = f"{transcript_path}:{line_start_pos}"
+            if line_pos_key in seen_message_ids:
                 continue
 
             try:
                 entry = json.loads(line.strip())
                 if entry.get("type") == "assistant":
                     message = entry.get("message", {})
-                    msg_id = message.get("id")
 
-                    # Extract text blocks (including those after tool_use)
+                    # Extract text blocks from this line only
                     text_content = []
 
-                    # Extract text content
-                    for block in message.get("content", []):
-                        if block.get("type") == "text":
+                    # Extract content from all block types
+                    content_blocks = message.get("content", [])
+                    if not isinstance(content_blocks, list):
+                        print(f"[DEBUG] Unexpected content type: {type(content_blocks)}")
+                        content_blocks = []
+
+                    for block in content_blocks:
+                        if not isinstance(block, dict):
+                            continue
+
+                        block_type = block.get("type")
+
+                        if block_type == "text":
                             text = block.get("text", "").strip()
                             # Skip XML observation blocks and empty text
                             if not text:
@@ -428,20 +448,97 @@ def extract_assistant_responses(transcript_path, last_response_pos=0, seen_messa
                                 continue
                             text_content.append(text)
 
-                    # Only include responses that have actual text content
+                        elif block_type == "thinking":
+                            # Skip thinking blocks - they are internal reasoning, not user-facing
+                            continue
+
+                        elif block_type == "tool_use":
+                            # Format tool_use as Markdown code block
+                            tool_name = block.get("name", "unknown_tool")
+                            tool_input = block.get("input", {})
+                            tool_id = block.get("id", "")
+                            try:
+                                input_str = json.dumps(tool_input, indent=2, ensure_ascii=False)
+                            except Exception:
+                                input_str = str(tool_input)
+                            tool_text = f"🔧 Tool Use: `{tool_name}` (ID: `{tool_id}`)\n\n```json\n{input_str}\n```"
+                            text_content.append(tool_text)
+
+                        elif block_type == "tool_result":
+                            # Format tool_result as Markdown code block
+                            tool_content = block.get("content", "")
+                            tool_use_id = block.get("tool_use_id", "")
+                            is_error = block.get("is_error", False)
+
+                            # Handle content that might be a list of blocks or a string
+                            if isinstance(tool_content, list):
+                                # Extract text from content blocks
+                                content_parts = []
+                                for item in tool_content:
+                                    if isinstance(item, dict):
+                                        if item.get("type") == "text":
+                                            content_parts.append(item.get("text", ""))
+                                        else:
+                                            content_parts.append(str(item))
+                                    else:
+                                        content_parts.append(str(item))
+                                tool_content_str = "\n".join(content_parts)
+                            elif isinstance(tool_content, str):
+                                tool_content_str = tool_content
+                            else:
+                                tool_content_str = str(tool_content)
+
+                            # Truncate very long content
+                            if len(tool_content_str) > 3000:
+                                tool_content_str = tool_content_str[:3000] + "\n\n... (truncated)"
+
+                            error_prefix = "❌ " if is_error else ""
+                            tool_text = f"{error_prefix}📤 Tool Result (ID: `{tool_use_id}`):\n\n```\n{tool_content_str}\n```"
+                            text_content.append(tool_text)
+
+                        elif block_type == "artifact":
+                            # Format artifact with metadata
+                            artifact_id = block.get("id", "")
+                            artifact_type = block.get("artifact_type", "")
+                            artifact_title = block.get("title", "")
+                            artifact_content = block.get("content", "")
+
+                            # Determine language hint from artifact type
+                            language_hint = ""
+                            if artifact_type == "application/vnd.chat.code":
+                                # Try to infer from title extension
+                                if artifact_title.endswith(".py"):
+                                    language_hint = "python"
+                                elif artifact_title.endswith((".js", ".ts")):
+                                    language_hint = "javascript"
+                                elif artifact_title.endswith(".html"):
+                                    language_hint = "html"
+                                elif artifact_title.endswith(".css"):
+                                    language_hint = "css"
+                                elif artifact_title.endswith(".json"):
+                                    language_hint = "json"
+                                elif artifact_title.endswith(".sh"):
+                                    language_hint = "bash"
+                                elif artifact_title.endswith((".yml", ".yaml")):
+                                    language_hint = "yaml"
+                            elif artifact_type == "text/markdown":
+                                language_hint = "markdown"
+                            elif artifact_type == "text/html":
+                                language_hint = "html"
+                            elif artifact_type == "image/svg+xml":
+                                language_hint = "svg"
+
+                            artifact_text = f"📄 Artifact: {artifact_title}\nType: `{artifact_type}` | ID: `{artifact_id}`\n\n```{language_hint}\n{artifact_content}\n```"
+                            text_content.append(artifact_text)
+
+                    # Mark this line as processed
+                    seen_message_ids.add(line_pos_key)
+
+                    # Add content from this line
                     if text_content:
                         full_text = "\n".join(text_content)
-                        # For new messages, add to responses
-                        # For existing messages, we skip (Claude sends complete messages, not deltas)
-                        if msg_id:
-                            if msg_id not in seen_message_ids:
-                                seen_message_ids.add(msg_id)
-                                responses.append(full_text)
-                                found_new_content = True
-                        else:
-                            # No message ID, treat as new content
-                            responses.append(full_text)
-                            found_new_content = True
+                        responses.append(full_text)
+                        found_new_content = True
 
             except (json.JSONDecodeError, KeyError):
                 # Skip malformed lines
@@ -621,6 +718,8 @@ class ResponseMonitor:
                 transcript_path, self.last_position, self._seen_message_ids
             )
 
+            print(f"[DEBUG] extract_assistant_responses: responses_len={len(responses)}, new_pos={new_position}, seen_ids={len(self._seen_message_ids)}")
+
             # 即使没有找到文本响应，也要更新位置（可能已经处理了工具调用）
             self.last_position = new_position
             # 保存当前状态
@@ -670,16 +769,22 @@ class ResponseMonitor:
     def _process_responses(self, transcript_path, responses, new_position):
         """Process and send responses to Telegram."""
         if not os.path.exists(Config.CHAT_ID_FILE):
+            print(f"[DEBUG] CHAT_ID_FILE not found: {Config.CHAT_ID_FILE}")
             return
 
         with open(Config.CHAT_ID_FILE) as f:
             chat_id = int(f.read().strip())
 
+        print(f"[DEBUG] Processing responses for chat {chat_id}, raw length={len(responses)}")
+        print(f"[DEBUG] Raw responses preview: {responses[:200]}...")
+
         cleaned_responses, memory_update = extract_memory_update(responses)
+
+        print(f"[DEBUG] Cleaned responses length={len(cleaned_responses)}, memory length={len(memory_update)}")
 
         # Skip empty responses (e.g., when only XML observations were present)
         if not cleaned_responses or not cleaned_responses.strip():
-            print(f"Skipping empty response for chat {chat_id}")
+            print(f"[DEBUG] Skipping empty response for chat {chat_id}")
             # 空响应也清理pending文件，避免卡住
             if os.path.exists(Config.PENDING_FILE):
                 os.remove(Config.PENDING_FILE)
@@ -848,28 +953,7 @@ class MessageQueue:
             tmux_send(full_prompt)
             tmux_send_enter()
 
-            # 等待Claude生成响应
-            print(f"[DEBUG] Waiting for Claude response...")
-            # 等待响应生成
-            start_time = time.time()
-            timeout = 120  # 增加到120秒超时
-            check_count = 0
-
-            while time.time() - start_time < timeout:
-                transcript_path = find_latest_transcript()
-                if transcript_path and transcript_path.exists():
-                    responses, _, _ = extract_assistant_responses(transcript_path, response_monitor.last_position, response_monitor._seen_message_ids)
-                    if responses and responses.strip():
-                        print(f"[DEBUG] Found Claude response after {check_count} checks")
-                        # 触发响应检查
-                        response_monitor._check_for_responses()
-                        return
-
-                check_count += 1
-                time.sleep(0.1)
-
-            # 超时后记录日志，但不清理pending文件，让response_monitor继续尝试
-            print(f"[DEBUG] Timeout waiting for response after {timeout}s, letting response_monitor continue")
+            print(f"[DEBUG] Message sent to tmux, response_monitor will handle the response asynchronously")
 
         except Exception as e:
             print(f"Error handling queued message: {e}")
