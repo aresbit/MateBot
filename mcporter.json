@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "/Users/mac/.bun/bin/qmd",
+      "args": ["mcp"]
+    }
+  }
+}
