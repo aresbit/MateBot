@@ -5,6 +5,11 @@ license: MIT
 ---
 
 # sp.h Overview
+The better single header C standard library replacement.
+
+## Installation
+Copy `./skill/include/sp.h` to your project or `/usr/include/`.
+
 - sp.h is a single-header C standard library replacement
 - You MUST annotate references to functions from sp.h with verbatim function headers
 - When providing references to code from `sp.h`, you MUST provide a matching declaration from `references/index.md`. Function names without the full declaration are COMPLETELY useless, and WILL NOT be tolerated.
