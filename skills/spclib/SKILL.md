@@ -495,3 +495,97 @@ for (u32 i = 0; i < sp_dyn_array_size(arr); i++) { ... }
 // ✅ 正确: 使用遍历宏
 sp_dyn_array_for(arr, i) { ... }
 ```
+
+## 项目实践反思
+
+以下是在 TED (Termux Editor) 项目中应用 sp.h 的经验总结：
+
+### 1. SP_IMPLEMENTATION 的正确使用
+sp.h 是单头文件库，需要在**一个且仅一个** C 文件中定义 `SP_IMPLEMENTATION` 宏：
+```c
+// 在 main.c 中：
+#define SP_IMPLEMENTATION
+#include "sp.h"
+
+// 在其他文件中只需包含头文件：
+#include "sp.h"
+```
+**错误现象**：多个 .o 文件中出现重复定义的链接错误。
+**解决方案**：确保 `SP_IMPLEMENTATION` 只在主源文件中定义一次。
+
+### 2. Android/Termux 平台适配
+在 Android/Termux 环境中，某些 POSIX 函数不可用：
+- `posix_spawn_file_actions_addchdir_np` 在 Android 上缺失
+**解决方案**：在编译时添加 `-DSP_PS_DISABLE` 禁用进程支持模块：
+```makefile
+CFLAGS += -DSP_PS_DISABLE
+```
+
+### 3. API 名称的正确使用
+sp.h 的 API 命名有特定规则，常见错误包括：
+- `sp_str_eq` → 正确：`sp_str_equal`
+- `sp_cstr_eq_n` → 正确：`strncmp`（标准库函数）
+- `sp_os_read_entire_file` → 正确：`sp_io_read_file`
+- `sp_str_builder_create` → 正确：使用 `sp_io_writer_from_dyn_mem()` + `sp_str_builder_from_writer()`
+
+### 4. 字符串结构成员
+`sp_str_t` 结构使用 `.data` 成员，而不是 `.ptr`：
+```c
+// ❌ 错误
+sp_str_t str = ...;
+c8 ch = str.ptr[i];
+
+// ✅ 正确
+c8 ch = str.data[i];
+```
+
+### 5. 标准输出处理
+sp.h 没有提供 `sp_io_stdout()` 函数：
+```c
+// ✅ 正确方式
+sp_io_writer_t stdout_writer = sp_io_writer_from_fd(
+    STDOUT_FILENO,
+    SP_IO_CLOSE_MODE_NONE
+);
+sp_io_write_str(stdout_writer, text);
+```
+
+### 6. 零初始化注意事项
+`SP_ZERO_INITIALIZE()` 不能用于赋值语句：
+```c
+// ❌ 错误（全局变量）
+editor_t E = SP_ZERO_INITIALIZE();
+
+// ✅ 正确方式
+editor_t E;
+sp_memset(&E, 0, sizeof(E));
+```
+
+### 7. 字符处理头文件
+使用 `isalpha`、`isdigit` 等函数时需要包含 `<ctype.h>`：
+```c
+#include <ctype.h>  // 必须包含
+```
+
+### 8. 字符串字面量与单个字符
+`sp_str_lit()` 宏用于字符串字面量，不适用于单个字符：
+```c
+// ❌ 错误
+sp_str_t ch = sp_str_lit("a");  // 实际上是字符串 "a"
+
+// ✅ 对于单个字符操作，使用字符类型 c8
+c8 ch = 'a';
+```
+
+### 9. 文件读写 API
+文件操作应使用 `sp_io_*` 系列函数：
+- 读取：`sp_str_t content = sp_io_read_file(path);`
+- 写入：使用 `sp_io_writer_from_file()` + `sp_io_write_str()` + `sp_io_writer_close()`
+
+### 10. 编译与调试建议
+1. **逐步编译**：先编译单个文件，确保 sp.h API 使用正确
+2. **查看错误信息**：仔细阅读编译错误，定位具体的 API 名称问题
+3. **参考索引**：使用 `reference/index.md` 查找正确的函数签名
+4. **平台测试**：在目标平台（Termux）上 early testing
+
+这些经验来自 TED 编辑器的实际开发过程，希望能帮助其他开发者更顺利地在项目中使用 sp.h 库。
