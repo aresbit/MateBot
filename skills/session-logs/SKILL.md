@@ -103,3 +103,47 @@ rg -l "phrase" ~/.clawdbot/agents/<agentId>/sessions/*.jsonl
 ```bash
 jq -r 'select(.type=="message") | .message.content[]? | select(.type=="text") | .text' ~/.clawdbot/agents/<agentId>/sessions/<id>.jsonl | rg 'keyword'
 ```
+
+## Python Utilities
+
+For more advanced extraction and analysis of Claude Code session logs, two Python scripts are provided:
+
+### `extract_session.py`
+
+Extracts the conversation (user and assistant messages) from a Claude Code JSONL file.
+
+```bash
+python3 extract_session.py <jsonl_file>
+```
+
+Options:
+- `--thinking-full`: Show full thinking text instead of truncation
+- `--tools-full`: Show full tool call details
+- `--role <user|assistant>`: Filter by role
+
+Examples:
+```bash
+# Extract entire conversation
+python3 extract_session.py session.jsonl
+
+# Extract only assistant messages with full thinking
+python3 extract_session.py session.jsonl --role assistant --thinking-full
+
+# Extract with full tool call details
+python3 extract_session.py session.jsonl --tools-full
+```
+
+### `extract_thinking.py`
+
+Extracts only thinking content from assistant messages.
+
+```bash
+python3 extract_thinking.py <jsonl_file>
+```
+
+Example:
+```bash
+python3 extract_thinking.py session.jsonl
+```
+
+These scripts handle the complex content structure (text, thinking, tool calls) and provide readable output. They are particularly useful for analyzing Claude Code's internal reasoning process.
