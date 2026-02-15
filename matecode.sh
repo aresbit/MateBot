@@ -16,6 +16,9 @@ NC='\033[0m'
 # Configuration
 TMUX_SESSION="claude"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Use MATEBOT_HOME if set (from wrapper script), otherwise derive from PROJECT_DIR
+MATEBOT_HOME="${MATEBOT_HOME:-$PROJECT_DIR}"
 HOOKS_DIR="$HOME/.claude/hooks"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 
@@ -49,8 +52,16 @@ setup_claude_hooks() {
     print_info "配置 Claude 钩子..."
     mkdir -p "$HOOKS_DIR"
 
-    if [ -f "$PROJECT_DIR/hooks/send-to-telegram.sh" ]; then
-        cp "$PROJECT_DIR/hooks/send-to-telegram.sh" "$HOOKS_DIR/"
+    # Check for hook source in MATEBOT_HOME/hooks or PROJECT_DIR/hooks
+    local hook_source=""
+    if [ -f "$MATEBOT_HOME/hooks/send-to-telegram.sh" ]; then
+        hook_source="$MATEBOT_HOME/hooks/send-to-telegram.sh"
+    elif [ -f "$PROJECT_DIR/hooks/send-to-telegram.sh" ]; then
+        hook_source="$PROJECT_DIR/hooks/send-to-telegram.sh"
+    fi
+
+    if [ -n "$hook_source" ]; then
+        cp "$hook_source" "$HOOKS_DIR/"
         chmod +x "$HOOKS_DIR/send-to-telegram.sh"
         print_success "钩子脚本已安装"
     else
@@ -121,10 +132,21 @@ EOF
         print_success "Bot 命令已注册"
     fi
 
-    # Start bridge
-    nohup python3 "$PROJECT_DIR/bridge.py" >"$PROJECT_DIR/bridge.log" 2>&1 &
+    # Start bridge - use MATEBOT_HOME if available, otherwise PROJECT_DIR
+    local bridge_script="${MATEBOT_HOME}/bridge.py"
+    local bridge_log="${MATEBOT_HOME}/bridge.log"
+    local bridge_pid="${MATEBOT_HOME}/bridge.pid"
+
+    # Fallback to PROJECT_DIR if running from source
+    if [ ! -f "$bridge_script" ]; then
+        bridge_script="$PROJECT_DIR/bridge.py"
+        bridge_log="$PROJECT_DIR/bridge.log"
+        bridge_pid="$PROJECT_DIR/bridge.pid"
+    fi
+
+    nohup python3 "$bridge_script" >"$bridge_log" 2>&1 &
     BRIDGE_PID=$!
-    echo $BRIDGE_PID > "$PROJECT_DIR/bridge.pid"
+    echo $BRIDGE_PID > "$bridge_pid"
 
     sleep 2
     if kill -0 $BRIDGE_PID 2>/dev/null; then
@@ -133,6 +155,14 @@ EOF
         print_error "Bridge 启动失败"
         exit 1
     fi
+}
+
+get_bridge_pid_file() {
+    local pid_file="${MATEBOT_HOME}/bridge.pid"
+    if [ ! -f "$pid_file" ] && [ -f "$PROJECT_DIR/bridge.pid" ]; then
+        pid_file="$PROJECT_DIR/bridge.pid"
+    fi
+    echo "$pid_file"
 }
 
 show_status() {
@@ -147,8 +177,10 @@ show_status() {
         print_error "tmux 会话: 未运行"
     fi
 
-    if [ -f "$PROJECT_DIR/bridge.pid" ] && kill -0 "$(cat "$PROJECT_DIR/bridge.pid")" 2>/dev/null; then
-        print_success "Bridge: 运行中 (PID: $(cat "$PROJECT_DIR/bridge.pid"))"
+    local pid_file
+    pid_file=$(get_bridge_pid_file)
+    if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+        print_success "Bridge: 运行中 (PID: $(cat "$pid_file"))"
     else
         print_error "Bridge: 未运行"
     fi
@@ -157,13 +189,15 @@ show_status() {
 stop_services() {
     print_info "停止服务..."
 
-    if [ -f "$PROJECT_DIR/bridge.pid" ]; then
-        BRIDGE_PID=$(cat "$PROJECT_DIR/bridge.pid")
+    local pid_file
+    pid_file=$(get_bridge_pid_file)
+    if [ -f "$pid_file" ]; then
+        BRIDGE_PID=$(cat "$pid_file")
         if kill -0 "$BRIDGE_PID" 2>/dev/null; then
             kill "$BRIDGE_PID" 2>/dev/null
             print_success "Bridge 已停止"
         fi
-        rm -f "$PROJECT_DIR/bridge.pid"
+        rm -f "$pid_file"
         pkill -f "bridge\.py|bridge-polling\.py"
      fi
 
@@ -177,8 +211,12 @@ stop_services() {
 
 show_logs() {
     echo "=== Bridge 日志 ==="
-    if [ -f "$PROJECT_DIR/bridge.log" ]; then
-        tail -n 20 "$PROJECT_DIR/bridge.log"
+    local log_file="${MATEBOT_HOME}/bridge.log"
+    if [ ! -f "$log_file" ] && [ -f "$PROJECT_DIR/bridge.log" ]; then
+        log_file="$PROJECT_DIR/bridge.log"
+    fi
+    if [ -f "$log_file" ]; then
+        tail -n 20 "$log_file"
     else
         print_warning "bridge.log 不存在"
     fi
