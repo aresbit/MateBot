@@ -1,0 +1,7 @@
+---
+name: test-skill
+description: |
+  This skill has: a colon, "quotes", and a | pipe character.
+  Use when: (1) testing YAML parsing, (2) validating special chars.
+version: 1.0.0
+---
