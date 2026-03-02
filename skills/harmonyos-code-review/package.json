@@ -1,0 +1,37 @@
+{
+  "name": "harmonyos-code-review",
+  "version": "1.0.0",
+  "description": "鸿蒙应用代码审查引擎 - 三阶段渐进式分析",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "collect": "node dist/cli.js collect",
+    "review": "node dist/cli.js review",
+    "run": "node dist/cli.js run"
+  },
+  "keywords": [
+    "harmonyos",
+    "arkts",
+    "code-review",
+    "static-analysis"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@typescript-eslint/parser": "^6.0.0",
+    "commander": "^11.1.0",
+    "diff": "^5.1.0",
+    "eslint": "^8.50.0",
+    "marked": "^9.0.0",
+    "typescript": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0"
+  }
+}

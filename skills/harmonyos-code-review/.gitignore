@@ -1,0 +1,11 @@
+node_modules/
+coverage/
+dist/
+*.log
+test-reports/
+test-reviews/
+test-reviews-batch/
+test-reviews-code/
+test-commits*.csv
+test-csv-output.js
+package-lock.json

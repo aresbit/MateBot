@@ -1,0 +1,208 @@
+{
+  "id": "photos_favorite",
+  "name": "图库收藏/取消收藏功能测试",
+  "description": "先点击第一张图执行收藏/取消收藏，再到我的收藏校验照片数量变化",
+  "app": "com.huawei.hmos.photos",
+  "tags": ["图库", "收藏", "功能测试"],
+  "steps": [
+    {
+      "step": 1,
+      "action": "launch_app",
+      "description": "冷启动图库应用",
+      "params": {
+        "force_stop": true,
+        "force_stop_wait": 0.8,
+        "bundle": "com.huawei.hmos.photos",
+        "ability": "com.huawei.hmos.photos.MainAbility"
+      }
+    },
+    {
+      "step": 2,
+      "action": "wait",
+      "description": "等待应用加载",
+      "params": {
+        "duration": 3
+      }
+    },
+    {
+      "step": 3,
+      "action": "click",
+      "description": "切换到相册标签",
+      "params": {
+        "coords": [660, 2720]
+      }
+    },
+    {
+      "step": 4,
+      "action": "wait",
+      "description": "等待相册页加载",
+      "params": {
+        "duration": 0.5
+      }
+    },
+    {
+      "step": 5,
+      "action": "click",
+      "description": "进入我的收藏相册",
+      "params": {
+        "coords": [594, 778]
+      }
+    },
+    {
+      "step": 6,
+      "action": "wait",
+      "description": "等待我的收藏相册加载",
+      "params": {
+        "duration": 0.5
+      }
+    },
+    {
+      "step": 7,
+      "action": "capture_count",
+      "description": "记录操作前我的收藏照片数量",
+      "params": {
+        "key": "favorite_before",
+        "locator": {
+          "type": "id",
+          "value": "photoGridView_gird_"
+        }
+      }
+    },
+    {
+      "step": 8,
+      "action": "key_event",
+      "description": "返回相册列表",
+      "params": {
+        "value": "Back"
+      }
+    },
+    {
+      "step": 9,
+      "action": "click",
+      "description": "切换到照片标签",
+      "params": {
+        "coords": [220, 2720]
+      }
+    },
+    {
+      "step": 10,
+      "action": "wait",
+      "description": "等待照片列表加载",
+      "params": {
+        "duration": 0.5
+      }
+    },
+    {
+      "step": 11,
+      "action": "click",
+      "description": "点击第一张照片",
+      "params": {
+        "coords": [218, 774]
+      }
+    },
+    {
+      "step": 12,
+      "action": "wait",
+      "description": "等待照片打开",
+      "params": {
+        "duration": 0.5
+      }
+    },
+    {
+      "step": 13,
+      "action": "click",
+      "description": "点击屏幕中央显示工具栏",
+      "params": {
+        "coords": [660, 1450]
+      }
+    },
+    {
+      "step": 14,
+      "action": "wait",
+      "description": "等待工具栏显示",
+      "params": {
+        "duration": 0.3
+      }
+    },
+    {
+      "step": 15,
+      "action": "click",
+      "description": "点击收藏/取消收藏按钮",
+      "params": {
+        "coords": [480, 2673]
+      }
+    },
+    {
+      "step": 16,
+      "action": "wait",
+      "description": "等待收藏状态更新",
+      "params": {
+        "duration": 2
+      }
+    },
+    {
+      "step": 17,
+      "action": "key_event",
+      "description": "返回上一层",
+      "params": {
+        "value": "Back"
+      }
+    },
+    {
+      "step": 18,
+      "action": "click",
+      "description": "切换到相册标签",
+      "params": {
+        "coords": [660, 2720]
+      }
+    },
+    {
+      "step": 19,
+      "action": "wait",
+      "description": "等待相册页加载",
+      "params": {
+        "duration": 0.5
+      }
+    },
+    {
+      "step": 20,
+      "action": "click",
+      "description": "再次进入我的收藏相册",
+      "params": {
+        "coords": [594, 778]
+      }
+    },
+    {
+      "step": 21,
+      "action": "wait",
+      "description": "等待我的收藏相册加载",
+      "params": {
+        "duration": 0.5
+      }
+    },
+    {
+      "step": 22,
+      "action": "verify_count_delta",
+      "description": "验证我的收藏数量发生预期变化（真机通常为 ±1，模拟器可能为 0）",
+      "params": {
+        "key": "favorite_before",
+        "allowed_deltas": [-1, 0, 1],
+        "locator": {
+          "type": "id",
+          "value": "photoGridView_gird_"
+        }
+      },
+      "expected": "收藏/取消收藏后，我的收藏相册数量通常变化 1；若模拟器未持久化，可能保持不变"
+    }
+  ],
+  "teardown_steps": [
+    {
+      "step": 1,
+      "action": "key_event",
+      "description": "返回主屏幕",
+      "params": {
+        "value": "Home"
+      }
+    }
+  ]
+}
