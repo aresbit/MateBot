@@ -1,0 +1,147 @@
+# Modern C Project Makefile Template
+# Based on gnaro project best practices
+# Replace PROJECT_NAME with your actual project name
+
+# ============================================================================
+# Project Configuration
+# ============================================================================
+
+# Build configuration
+DEBUG ?= 0          # 0=release, 1=debug
+BUILD_TYPE ?= release
+
+# Project structure
+NAME := PROJECT_NAME
+SRC_DIR := src
+BUILD_DIR := build
+INCLUDE_DIR := include
+LIB_DIR := lib
+TESTS_DIR := tests
+BIN_DIR := bin
+
+# Toolchain configuration
+CC := gcc
+CXX := g++
+LINTER := clang-tidy
+FORMATTER := clang-format
+
+# Compiler flags
+CFLAGS := -std=gnu17 -Wall -Wextra -pedantic
+CXXFLAGS := -std=c++17 -Wall -Wextra -pedantic
+CPPFLAGS := -I$(INCLUDE_DIR) -I$(LIB_DIR)
+LDFLAGS := -lm
+
+# Conditional compilation based on build type
+ifeq ($(DEBUG),1)
+    CFLAGS += -g -O0 -DDEBUG
+    CXXFLAGS += -g -O0 -DDEBUG
+else
+    ifeq ($(BUILD_TYPE),release)
+        CFLAGS += -O3 -DNDEBUG
+        CXXFLAGS += -O3 -DNDEBUG
+    else ifeq ($(BUILD_TYPE),debug)
+        CFLAGS += -g -O2 -DDEBUG
+        CXXFLAGS += -g -O2 -DDEBUG
+    else ifeq ($(BUILD_TYPE),profile)
+        CFLAGS += -g -O2 -pg
+        CXXFLAGS += -g -O2 -pg
+    endif
+endif
+
+# Automatic file discovery
+C_SOURCES := $(wildcard $(SRC_DIR)/*.c) $(wildcard $(LIB_DIR)/**/*.c)
+CXX_SOURCES := $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(LIB_DIR)/**/*.cpp)
+OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES)) \
+           $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CXX_SOURCES))
+
+# ============================================================================
+# Build Rules
+# ============================================================================
+
+# Default target
+all: dir $(BIN_DIR)/$(NAME)
+
+# Main executable
+$(BIN_DIR)/$(NAME): $(OBJECTS)
+	$(CC) $(CFLAGS) $(OBJECTS) -o $@ $(LDFLAGS)
+
+# C source compilation
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+# C++ source compilation  
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+# ============================================================================
+# Development Tools
+# ============================================================================
+
+# Code quality checks
+lint:
+	@if command -v $(LINTER) >/dev/null 2>&1; then \
+		$(LINTER) $(SRC_DIR)/* $(INCLUDE_DIR)/* $(TESTS_DIR)/* -- $(CFLAGS); \
+	else \
+		echo "Warning: $(LINTER) not found. Install it or adjust LINTER variable."; \
+	fi
+
+format:
+	@if command -v $(FORMATTER) >/dev/null 2>&1; then \
+		$(FORMATTER) -style=file -i $(SRC_DIR)/* $(INCLUDE_DIR)/* $(TESTS_DIR)/*; \
+	else \
+		echo "Warning: $(FORMATTER) not found. Install it or adjust FORMATTER variable."; \
+	fi
+
+# Testing (adapt for your test framework)
+test: dir
+	@echo "Configure test target for your test framework (CUnit, Check, Google Test, etc.)"
+	@echo "Example for CUnit:"
+	@echo "  \$$(CC) \$$(CFLAGS) -o \$$(BIN_DIR)/\$$(NAME)_test \$$(TESTS_DIR)/*.c \$$(LDFLAGS) -lcunit"
+	@echo "  \$$(BIN_DIR)/\$$(NAME)_test"
+
+# Memory checking
+memcheck: $(BIN_DIR)/$(NAME)
+	@if command -v valgrind >/dev/null 2>&1; then \
+		valgrind --leak-check=full ./$(BIN_DIR)/$(NAME); \
+	else \
+		echo "Warning: valgrind not found. Install it for memory checking."; \
+	fi
+
+# Create necessary directories
+dir:
+	@mkdir -p $(BUILD_DIR) $(BIN_DIR)
+
+# Clean build artifacts
+clean:
+	rm -rf $(BUILD_DIR) $(BIN_DIR)
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all       - Build project (default)"
+	@echo "  debug=1   - Build with debug configuration"
+	@echo "  lint      - Run static code analysis"
+	@echo "  format    - Format source code"
+	@echo "  test      - Run tests (configure first)"
+	@echo "  memcheck  - Run memory checks with valgrind"
+	@echo "  clean     - Remove build artifacts"
+	@echo "  help      - Show this help message"
+
+# ============================================================================
+# Phony Targets Declaration
+# ============================================================================
+
+.PHONY: all lint format test memcheck dir clean help
+
+# ============================================================================
+# Notes for Customization
+# ============================================================================
+
+# 1. Replace PROJECT_NAME with your actual project name
+# 2. Adjust directory structure if different from template
+# 3. Set appropriate compiler and tool versions
+# 4. Configure test framework in 'test' target
+# 5. Add library dependencies to LDFLAGS
+# 6. For cross-platform support, add platform detection conditionals

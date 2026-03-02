@@ -38,7 +38,7 @@ fi
 # Install oh-my-tmux if not present
 if [ ! -d "$HOME/.tmux" ]; then
     print_info "Installing oh-my-tmux..."
-    git clone --depth 1 https://github.com/gpakosz/.tmux.git ~/.tmux
+    git clone --depth 1 git@github.com:gpakosz/.tmux.git ~/.tmux
     ln -sf ~/.tmux/.tmux.conf ~/.tmux.conf
     print_success "oh-my-tmux installed"
 else
