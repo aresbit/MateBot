@@ -1,0 +1,137 @@
+/*
+ * Copyright (c) 2026 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+#define MLOG_TAG "${TEST_CLASS_NAME}Test"
+
+#include "${TEST_NAME}_test.h"
+
+#include <chrono>
+#include <thread>
+#include <vector>
+
+// Access private/protected members for testing
+#define private public
+#define protected public
+#include "${TARGET_HEADER}.h"
+#undef private
+#undef protected
+
+#include "medialibrary_unittest_utils.h"
+#include "medialibrary_unistore_manager.h"
+#include "medialibrary_data_manager.h"
+
+using namespace std;
+using namespace testing::ext;
+using namespace OHOS::NativeRdb;
+
+namespace OHOS {
+namespace Media {
+
+static shared_ptr<MediaLibraryRdbStore> g_rdbStore;
+static uint64_t g_shellToken = 0;
+static MediaLibraryMockHapToken* mockToken = nullptr;
+
+void CleanTestTables()
+{
+    vector<string> dropTableList = {
+        // Add table names to clean up
+    };
+    for (auto &dropTable : dropTableList) {
+        string dropSql = "DROP TABLE IF EXISTS " + dropTable + ";";
+        int32_t ret = g_rdbStore->ExecuteSql(dropSql);
+        if (ret != NativeRdb::E_OK) {
+            MEDIA_ERR_LOG("Drop %{public}s table failed", dropTable.c_str());
+        }
+    }
+}
+
+void SetTables()
+{
+    vector<string> createTableSqlList = {
+        // Add CREATE TABLE statements
+    };
+    for (auto &createTableSql : createTableSqlList) {
+        int32_t ret = g_rdbStore->ExecuteSql(createTableSql);
+        if (ret != NativeRdb::E_OK) {
+            MEDIA_ERR_LOG("Execute sql failed");
+        }
+    }
+}
+
+void ClearAndRestart()
+{
+    if (!MediaLibraryUnitTestUtils::IsValid()) {
+        MediaLibraryUnitTestUtils::Init();
+    }
+    CleanTestTables();
+    SetTables();
+}
+
+void ${TEST_CLASS_NAME}Test::SetUpTestCase(void)
+{
+    MediaLibraryUnitTestUtils::Init();
+    g_shellToken = IPCSkeleton::GetSelfTokenID();
+    MediaLibraryMockTokenUtils::RestoreShellToken(g_shellToken);
+
+    vector<string> perms;
+    perms.push_back("ohos.permission.GET_NETWORK_INFO");
+    mockToken = new MediaLibraryMockHapToken("com.ohos.medialibrary.medialibrarydata", perms);
+    for (auto &perm : perms) {
+        MediaLibraryMockTokenUtils::GrantPermissionByTest(IPCSkeleton::GetSelfTokenID(), perm, 0);
+    }
+
+    g_rdbStore = MediaLibraryUnistoreManager::GetInstance().GetRdbStore();
+    if (g_rdbStore == nullptr) {
+        MEDIA_ERR_LOG("Failed to get rdbstore");
+        exit(1);
+    }
+    SetTables();
+}
+
+void ${TEST_CLASS_NAME}Test::TearDownTestCase(void)
+{
+    if (!MediaLibraryUnitTestUtils::IsValid()) {
+        MediaLibraryUnitTestUtils::Init();
+    }
+    ClearAndRestart();
+    g_rdbStore = nullptr;
+    MediaLibraryDataManager::GetInstance()->ClearMediaLibraryMgr();
+    this_thread::sleep_for(chrono::seconds(1));
+
+    if (mockToken != nullptr) {
+        delete mockToken;
+        mockToken = nullptr;
+    }
+
+    MediaLibraryMockTokenUtils::ResetToken();
+    SetSelfTokenID(g_shellToken);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+}
+
+void ${TEST_CLASS_NAME}Test::SetUp()
+{
+    ASSERT_NE(g_rdbStore, nullptr);
+    ClearAndRestart();
+}
+
+void ${TEST_CLASS_NAME}Test::TearDown()
+{
+}
+
+// TODO: Add test cases following the patterns in test-patterns.md
+
+HWTEST_F(${TEST_CLASS_NAME}Test, ${FEATURE_NAME}_test_001, TestSize.Level0)
+{
+    MEDIA_INFO_LOG("${FEATURE_NAME}_test_001 Start");
+    // Add test logic here
+    MEDIA_INFO_LOG("${FEATURE_NAME}_test_001 End");
+}
+
+} // namespace Media
+} // namespace OHOS
