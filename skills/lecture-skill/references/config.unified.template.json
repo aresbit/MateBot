@@ -1,0 +1,10 @@
+{
+  "name": "arch-course-skill",
+  "description": "Computer architecture lecture PDFs",
+  "merge_mode": "rule-based",
+  "cleanup_pdf_intermediates": true,
+  "sources": [
+    { "type": "pdf", "path": "arch/Lec01-intro.pdf" },
+    { "type": "pdf", "path": "arch/Lec02-review.pdf" }
+  ]
+}
