@@ -42,6 +42,8 @@ LIBDIR          := $(DESTDIR)$(PREFIX)/lib/matebot
 SHAREDIR        := $(DESTDIR)$(PREFIX)/share/matebot
 DOCDIR          := $(DESTDIR)$(PREFIX)/share/doc/matebot
 CLAUDE_HOOKDIR  := $(HOME)/.claude/hooks
+CLAUDE_SKILLDIR := $(HOME)/.claude/skills
+CLAUDE_DISABLED_SKILLDIR := $(CLAUDE_SKILLDIR)/.disabled
 
 # Source files
 SCRIPT_SRCS := matecode.sh bridge_manager.sh start_bridge.sh stop_bridge.sh tmux-setup.sh
@@ -93,7 +95,7 @@ endef
 # Default Target
 # -----------------------------------------------------------------------------
 
-.PHONY: all help install uninstall clean test check dry-run
+.PHONY: all help install uninstall clean test check dry-run skill
 
 all: help
 
@@ -110,6 +112,7 @@ help:
 	@echo "  $(GREEN)test$(RESET)         Run basic tests"
 	@echo "  $(GREEN)check$(RESET)        Check dependencies"
 	@echo "  $(GREEN)dry-run$(RESET)      Show what would be installed"
+	@echo "  $(GREEN)skill$(RESET)        Install local skills to ~/.claude/skills (no overwrite)"
 	@echo ""
 	@echo "Variables:"
 	@echo "  $(YELLOW)PREFIX$(RESET)       Installation prefix [$(HOME)/.local]"
@@ -334,3 +337,32 @@ dry-run:
 			echo "  $$hook -> $(CLAUDE_HOOKDIR)/$$base"; \
 		fi \
 	done
+
+# -----------------------------------------------------------------------------
+# Install Skills to Claude Skill Directory (non-destructive)
+# -----------------------------------------------------------------------------
+
+skill:
+	$(call print_info,"Installing local skills to $(CLAUDE_SKILLDIR)...")
+	@mkdir -p "$(CLAUDE_SKILLDIR)" "$(CLAUDE_DISABLED_SKILLDIR)"
+	@installed=0; skipped_exists=0; skipped_tombstone=0; \
+	for src in skills/*; do \
+		[ -d "$$src" ] || continue; \
+		name=$$(basename "$$src"); \
+		dest="$(CLAUDE_SKILLDIR)/$$name"; \
+		tombstone="$(CLAUDE_DISABLED_SKILLDIR)/$$name"; \
+		if [ -e "$$tombstone" ]; then \
+			printf "$(YELLOW)!$(RESET) Skipped %s (found tombstone in .disabled)\n" "$$name"; \
+			skipped_tombstone=$$((skipped_tombstone + 1)); \
+			continue; \
+		fi; \
+		if [ -e "$$dest" ]; then \
+			printf "$(YELLOW)!$(RESET) Skipped %s (already exists)\n" "$$name"; \
+			skipped_exists=$$((skipped_exists + 1)); \
+			continue; \
+		fi; \
+		cp -R "$$src" "$$dest" && \
+		printf "$(GREEN)✓$(RESET) Installed %s\n" "$$name" && \
+		installed=$$((installed + 1)); \
+	done; \
+	printf "\nInstalled: %s, Skipped(existing): %s, Skipped(.disabled): %s\n" "$$installed" "$$skipped_exists" "$$skipped_tombstone"
