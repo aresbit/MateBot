@@ -2,6 +2,8 @@
 name: modern-c-dev
 description: |
   Claude-optimized modern C skill from sysprog c-prog notes.
+  This skill also integrates an external structured C tutorial route map
+  for practical learning and debugging workflows.
   Use this skill for modern C language engineering tasks, especially when you need:
   - Memory management, pointer manipulation, and alignment guidance
   - Compiler toolchain behavior, optimization, and ABI understanding
@@ -13,6 +15,7 @@ description: |
   - Preprocessor techniques and macro safety
   - Dynamic linking and ELF format understanding
   - Linked list and non-contiguous memory operations
+  - Beginner-to-advanced C learning paths and problem diagnosis patterns
 
   Trigger this skill whenever the user mentions C programming, memory issues,
   pointer bugs, compiler warnings, undefined behavior, or low-level system programming.
@@ -25,6 +28,7 @@ description: |
 This skill provides practical guidance for modern C language engineering tasks,
 sourced from the comprehensive "你所不知道的 C 語言" (Things You Don't Know About C)
 lecture series by sysprog.
+It also fuses an external tutorial-based route map for practice, basics, and expertise progression.
 
 ## Quick Reference Index
 
@@ -52,6 +56,35 @@ lecture series by sysprog.
 | Compiler Optimization | `references/21-compiler-optimization.md` | Optimization flags, techniques |
 | Linker & ELF | `references/22-linker-elf.md` | Linking, ELF format |
 | Linked Lists | `references/23-linked-list-memory.md` | List operations, memory |
+| External C Route Map | `references/c-tutorial-route-map.md` | Learning progression and topic routing |
+| External C Essence | `references/c-tutorial-essence.md` | Distilled actionable rules for answers |
+
+## Fusion Strategy (sysprog + external tutorial)
+
+Use both sources together:
+- Use sysprog references for deep implementation-level detail.
+- Use external route map for pedagogical sequencing and issue triage.
+- Start from topic classification (`practice`, `basics`, `expertise`), then jump to the strongest sysprog reference.
+
+Recommended response order:
+1. Classify the user's request into topic bucket(s).
+2. Give a compact conceptual explanation.
+3. Provide a minimal compilable C example.
+4. Add a risk checklist (UB, lifetime, conversion, side effects).
+5. Point to one route-map topic and one sysprog reference for follow-up.
+
+## External Topic Router
+
+Routing references:
+- `references/c-tutorial-route-map.md`
+- `references/c-tutorial-essence.md`
+
+When users ask these, prioritize external mapping first:
+- Beginner mistakes, debugging process, asking for help, coding style, naming
+- Function/types/I-O/type conversion
+- Declaration vs definition, scope/lifetime, dynamic allocation
+- C standard differences, UB/unspecified behavior, lvalue/rvalue
+- Array vs pointer, memory layout, struct details, side effects in subexpressions
 
 ## Task Routing Guide
 
