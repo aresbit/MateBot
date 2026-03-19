@@ -343,7 +343,7 @@ dry-run:
 # -----------------------------------------------------------------------------
 
 skill:
-	$(call print_info,"Installing local skills to $(CLAUDE_SKILLDIR)...")
+	@printf "$(CYAN)==>$(RESET) %s\n" "Installing local skills to $(CLAUDE_SKILLDIR)..."
 	@mkdir -p "$(CLAUDE_SKILLDIR)" "$(CLAUDE_DISABLED_SKILLDIR)"
 	@installed=0; skipped_exists=0; skipped_tombstone=0; \
 	for src in skills/*; do \
@@ -366,3 +366,35 @@ skill:
 		installed=$$((installed + 1)); \
 	done; \
 	printf "\nInstalled: %s, Skipped(existing): %s, Skipped(.disabled): %s\n" "$$installed" "$$skipped_exists" "$$skipped_tombstone"
+
+# -----------------------------------------------------------------------------
+# Individual Skill Installation (targets for each skill directory)
+# -----------------------------------------------------------------------------
+SKILLS := $(wildcard skills/*)
+SKILL_NAMES := $(notdir $(SKILLS))
+
+.PHONY: $(SKILL_NAMES)
+$(SKILL_NAMES):
+	@printf "$(CYAN)==>$(RESET) %s\n" "Installing skill $@ to $(CLAUDE_SKILLDIR)..."
+	@mkdir -p "$(CLAUDE_SKILLDIR)" "$(CLAUDE_DISABLED_SKILLDIR)"
+	@src="skills/$@"; \
+	name="$@"; \
+	dest="$(CLAUDE_SKILLDIR)/$$name"; \
+	tombstone="$(CLAUDE_DISABLED_SKILLDIR)/$$name"; \
+	if [ -e "$$tombstone" ]; then \
+		printf "$(YELLOW)!$(RESET) Skipped %s (found tombstone in .disabled)\n" "$$name"; \
+		exit 0; \
+	fi; \
+	if [ -e "$$dest" ]; then \
+		printf "$(YELLOW)!$(RESET) Skipped %s (already exists)\n" "$$name"; \
+		exit 0; \
+	fi; \
+	cp -R "$$src" "$$dest" && \
+	printf "$(GREEN)✓$(RESET) Installed %s\n" "$$name";
+
+# -----------------------------------------------------------------------------
+# Default rule for unknown targets
+# -----------------------------------------------------------------------------
+%:
+	@printf "$(RED)✗$(RESET) %s\n" "Unknown target '$@'. Try 'make help' for available targets."
+	@exit 1
