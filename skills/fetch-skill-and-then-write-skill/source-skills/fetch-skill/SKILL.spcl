@@ -51,7 +51,7 @@ content =
 
   quick_start =
     command =
-      = SKILL=~/yyscode/fetch-skill/scripts/fetch.py
+      = SKILL=~/.claude/skills/fetch-skill/scripts/fetch.py
     example =
       description = 抓取任意网页（自动选最佳策略）
       command = python3 $SKILL https://example.com

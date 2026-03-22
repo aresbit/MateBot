@@ -23,7 +23,7 @@
 ## 快速开始
 
 ```bash
-SKILL=~/yyscode/fetch-skill/scripts/fetch.py
+SKILL=~/.claude/skills/fetch-skill/scripts/fetch.py
 
 # 抓取任意网页（自动选最佳策略）
 python3 $SKILL https://example.com
