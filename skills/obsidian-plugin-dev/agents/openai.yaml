@@ -1,0 +1,4 @@
+interface:
+  display_name: "Obsidian Plugin Dev"
+  short_description: "Build, debug, package, and submit Obsidian plugins."
+  default_prompt: "Use $obsidian-plugin-dev to scaffold, develop, and release an Obsidian community plugin from start to publish."
