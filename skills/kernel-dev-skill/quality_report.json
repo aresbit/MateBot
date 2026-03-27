@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-03-27T12:09:39.918428",
+  "skill_name": "linux-kernel-modernization-skill",
+  "overall_score": {
+    "total_score": 86.5,
+    "completeness": 80.0,
+    "accuracy": 100.0,
+    "coverage": 70.0,
+    "health": 100.0,
+    "grade": "A-"
+  },
+  "metrics": [
+    {
+      "name": "Completeness",
+      "value": 80.0,
+      "level": "MetricLevel.INFO",
+      "description": "Documentation completeness: 80.0%",
+      "suggestions": [
+        "Expand documentation coverage"
+      ]
+    },
+    {
+      "name": "Accuracy",
+      "value": 100.0,
+      "level": "MetricLevel.INFO",
+      "description": "Documentation accuracy: 100.0%",
+      "suggestions": []
+    },
+    {
+      "name": "Coverage",
+      "value": 70.0,
+      "level": "MetricLevel.INFO",
+      "description": "Documentation coverage: 70.0%",
+      "suggestions": [
+        "Expand documentation coverage"
+      ]
+    },
+    {
+      "name": "Health",
+      "value": 100.0,
+      "level": "MetricLevel.INFO",
+      "description": "Skill health: 100.0%",
+      "suggestions": []
+    }
+  ],
+  "statistics": {
+    "total_files": 5,
+    "total_size_bytes": 7567,
+    "markdown_files": 5,
+    "reference_files": 3,
+    "total_characters": 5101,
+    "total_words": 535
+  },
+  "recommendations": [],
+  "history": []
+}

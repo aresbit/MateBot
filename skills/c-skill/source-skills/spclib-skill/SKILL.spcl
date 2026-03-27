@@ -1,0 +1,236 @@
+meta =
+  name = spclib
+  version = 1
+  license = MIT
+
+title = spclib - sp.h Programming Guide
+
+skill =
+  name = spclib
+  description =
+    This skill should be used when the user asks to "write C code with sp.h", "use spclib", "sp.h API", "single-header C library",
+    "modern C programming", "sp_str_t usage", "sp_alloc memory", "SP_LOG formatting", "dynamic array in C", "hash table in C",
+    "cross-platform C code", or when working with the sp.h single-header C standard library replacement.
+  entry = SKILL.spcl
+  refs =
+    = reference/*.spcl
+    = include/sp.h
+  extras =
+    = references/example/cli/palette.c
+    = references/example/cli/prompt.c
+    = references/example/freestanding/embed.c
+    = references/example/freestanding/jit.c
+    = references/example/msvc.c
+    = references/index.md
+
+content =
+  core_principles =
+    title = Core Principles
+    text =
+      **Always follow these rules when using sp.h:**
+    rules =
+      =
+        never_use = malloc/calloc/realloc
+        use_instead = sp_alloc()
+      =
+        never_use = const char*
+        use_instead = sp_str_t (ptr+len string)
+      =
+        never_use = strcmp/strlen
+        use_instead = sp_str_equal() / sp_str_len()
+      =
+        never_use = printf
+        use_instead = SP_LOG()
+      =
+        never_use = memset(&obj, 0, sizeof(obj))
+        use_instead = SP_ZERO_INITIALIZE()
+      =
+        never_use = for(i=0; i<n; i++) on arrays
+        use_instead = sp_dyn_array_for() / sp_carr_for()
+
+  quick_reference =
+    title = Quick Reference
+    setup =
+      title = Setup
+      code =
+        // In ONE C file only:
+        #define SP_IMPLEMENTATION
+        #include "sp.h"
+    types =
+      title = Types
+      items =
+        = s8/s16/s32/s64 - signed integers
+        = u8/u16/u32/u64 - unsigned integers
+        = f32/f64 - floats
+        = c8 - char (UTF-8)
+        = sp_str_t - {data, len} string (no null terminator)
+    string_operations =
+      title = String Operations
+      code =
+        sp_str_t s = sp_str_lit("hello");     // Compile-time literal
+        sp_str_t v = sp_str_view(cstr);       // View from C string
+        bool eq = sp_str_equal(a, b);         // Compare
+        bool empty = sp_str_empty(s);         // Check empty
+    dynamic_arrays =
+      title = Dynamic Arrays
+      code =
+        sp_dyn_array(int) arr = SP_NULLPTR;
+        sp_dyn_array_push(arr, 42);
+        sp_dyn_array_for(arr, i) { /* use arr[i] */ }
+    directory_iteration =
+      title = Directory Iteration
+      simple =
+        title = Simple directory traversal
+        code =
+          sp_fs_for(dir, it) {
+            SP_LOG("Entry: {}", SP_FMT_STR(it.entry.name));
+          }
+      recursive =
+        title = Recursive directory traversal
+        code =
+          sp_fs_for_recursive(dir, it) {
+            SP_LOG("Path: {}", SP_FMT_STR(it.entry.path));
+          }
+    hash_tables =
+      title = Hash Tables
+      code =
+        sp_ht(sp_str_t, s32) map = SP_NULLPTR;
+        sp_ht_set_fns(map, sp_ht_hash_str, sp_ht_compare_str);
+        sp_ht_insert(map, sp_str_lit("key"), 100);
+        s32* val = sp_ht_getp(map, sp_str_lit("key"));
+    logging =
+      title = Logging
+      code =
+        SP_LOG("Value: {}", SP_FMT_S32(x));
+        SP_LOG("{:fg green}Success{:reset}", SP_FMT_CSTR(""))
+
+  module_namespaces =
+    title = Module Namespaces
+    text =
+      Search `references/index.md` for detailed API signatures:
+    table =
+      =
+        namespace = sp_str_*
+        purpose = String operations
+        key_functions = sp_str_lit, sp_str_equal, sp_str_empty
+      =
+        namespace = sp_cstr_*
+        purpose = C string operations
+        key_functions = sp_cstr_len, sp_cstr_equal
+      =
+        namespace = sp_dyn_array_* / sp_da
+        purpose = Dynamic arrays
+        key_functions = sp_dyn_array_push, sp_dyn_array_for
+      =
+        namespace = sp_ht_*
+        purpose = Hash tables
+        key_functions = sp_ht_insert, sp_ht_getp, sp_ht_for
+      =
+        namespace = sp_alloc / sp_free
+        purpose = Memory allocation
+        key_functions = sp_alloc, sp_realloc, sp_free
+      =
+        namespace = sp_io_*
+        purpose = File IO
+        key_functions = sp_io_read_file, sp_io_write_file
+      =
+        namespace = sp_fs_*
+        purpose = Filesystem
+        key_functions = sp_fs_exists, sp_fs_read, sp_fs_write, sp_fs_for, sp_fs_for_recursive
+      =
+        namespace = sp_ps_*
+        purpose = Processes
+        key_functions = sp_ps_run, sp_ps_spawn
+      =
+        namespace = sp_tm_*
+        purpose = Time
+        key_functions = sp_tm_now_ns, sp_tm_sleep_ms
+      =
+        namespace = sp_thread_*
+        purpose = Threads
+        key_functions = sp_thread_create, sp_thread_join
+      =
+        namespace = sp_mutex_*
+        purpose = Mutexes
+        key_functions = sp_mutex_init, sp_mutex_lock
+      =
+        namespace = sp_env_*
+        purpose = Environment
+        key_functions = sp_env_get, sp_env_set
+      =
+        namespace = sp_os_*
+        purpose = Platform
+        key_functions = sp_os_get_executable_ext
+      =
+        namespace = SP_LOG / SP_FMT_*
+        purpose = Logging
+        key_functions = SP_LOG, SP_FMT_STR, SP_FMT_S32
+
+  common_patterns =
+    title = Common Patterns
+    zero_initialization =
+      title = Zero Initialization
+      code =
+        my_struct_t obj = SP_ZERO_INITIALIZE();
+    error_handling =
+      title = Error Handling
+      code =
+        sp_try(expr);                    // Return if expr fails
+        sp_try_goto(expr);               // goto sp_try_label if expr fails
+        sp_try_as_goto(expr, label);     // goto label if expr fails
+        sp_require(ptr != NULL);         // Return if condition false
+        SP_ASSERT(condition);            // Assert
+        SP_FATAL("msg {}", SP_FMT(...)); // Log and exit
+    switch_statements =
+      title = Switch Statements
+      code =
+        switch (val) {
+          case A: { break; }
+          case B: { break; }
+          default: { SP_UNREACHABLE_CASE(); }
+        }
+
+  reference_files =
+    title = Reference Files
+    text =
+      For complete API documentation with full function signatures:
+    items =
+      =
+        file = references/index.md
+        description = Comprehensive API reference with all function signatures, types, and macros
+
+  examples =
+    title = Examples
+    text =
+      Example code demonstrating sp.h usage:
+    table =
+      =
+        file = references/example/msvc.c
+        description = MSVC compiler specific examples
+      =
+        file = references/example/cli/palette.c
+        description = Terminal color palette demo
+      =
+        file = references/example/cli/prompt.c
+        description = Interactive CLI prompt example
+      =
+        file = references/example/freestanding/jit.c
+        description = Just-in-time compilation example
+      =
+        file = references/example/freestanding/embed.c
+        description = Embedded usage example
+
+  finding_apis =
+    title = Finding APIs
+    text =
+      When looking for a specific function:
+    steps =
+      = Check the namespace table above
+      = Search `references/index.md` for the pattern
+      = All public APIs are prefixed with `SP_API` in the source
+
+resolve =
+  merge = deep
+  conflict = right-bias
+  fixpoint = true
+  max_iter = 64

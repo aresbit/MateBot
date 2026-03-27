@@ -1,0 +1,4 @@
+experiment	score	max_score	pass_rate	status	description
+0	6	7	85.7%	baseline	original skill (no efficiency mode section)
+1	7	7	100.0%	keep	added "高效模式（30分钟）" with command budget and 10-minute validation rule
+2	7	7	100.0%	discard	added glossary section; no measurable gain

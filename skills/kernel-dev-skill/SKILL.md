@@ -1,0 +1,111 @@
+---
+name: kernel-dev-skill
+description: 以最小改动现代化 Linux 内核驱动并恢复编译/运行；当用户提到驱动移植、内核升级不兼容、API 过时、DKMS 或 probe/remove 问题时立即使用。
+---
+
+# Linux Kernel Driver Modernization
+
+核心准则：`简单优于一切`。优先最小改动、可回滚、可验证的修复路径。
+
+## 何时使用
+
+在以下场景直接使用本技能：
+- 旧驱动在新内核（如 5.x/6.x）编译失败
+- 运行时报 probe 失败、符号缺失、结构体字段变化
+- 需要把 out-of-tree 驱动迁移到新 API
+- 需要给出“先能编译，再逐步正确”的改造方案
+
+## 输入清单
+
+先收集最小必要信息，避免过度分析：
+- 目标内核版本与发行版
+- 驱动源码路径、`Kbuild/Makefile`
+- 第一批编译错误（前 50 行）
+- 运行时关键日志：`dmesg` 中对应模块片段
+- 硬件总线类型（PCI/I2C/SPI/Platform/USB）
+
+## 执行顺序（最短路径）
+
+1. 先复现失败并冻结基线：只跑一次完整构建，保存原始错误。
+2. 按“编译阻塞优先级”修复：先类型/API/宏，再语义行为。
+3. 每次只做一类改动并重新编译，保证可回滚。
+4. 编译通过后再做最小运行验证（加载、probe、基本 IO）。
+5. 最后补静态检查和回归清单。
+
+## 常见现代化改造清单
+
+按出现频率从高到低排查：
+- `file_operations`/`proc_ops` 结构差异
+- `timer_list` 新接口与回调签名变化
+- `get_user_pages*`、DMA 映射、内存 API 变化
+- `irq` 注册/释放、`devm_*` 资源管理替换
+- `strlcpy`/`scnprintf`/`min_t` 等安全接口替换
+- 内核日志级别与 `pr_*` 规范化
+- `of_*`/`acpi_*` 匹配和设备树兼容字段
+
+## 最小改动策略
+
+- 先兼容层，后重构：优先加薄封装宏/静态内联函数，不先大改架构。
+- 不跨文件大搬迁：单次变更限定在单一主题。
+- 不提前优化：先让代码正确，再谈性能与风格统一。
+- 用内核已有 helper，不重复造轮子。
+
+## 诊断命令
+
+```bash
+make -C /lib/modules/$(uname -r)/build M=$PWD V=1 modules
+```
+
+```bash
+make -C /lib/modules/$(uname -r)/build M=$PWD W=1 C=1 modules
+```
+
+```bash
+sparse -Wbitwise -Wcontext -Wcast-to-as -Wdefault-bitfield-sign -Wno-transparent-union
+```
+
+```bash
+scripts/checkpatch.pl --strict --max-line-length=100 -f <changed_file.c>
+```
+
+```bash
+coccicheck MODE=report M=$PWD
+```
+
+```bash
+dmesg -T | tail -n 200
+```
+
+## 输出模板
+
+始终按以下结构输出，保持简洁：
+
+```text
+# Modernization Plan
+## 1) Build blockers (must-fix first)
+## 2) Minimal patch set (ordered, reversible)
+## 3) Runtime smoke checks
+## 4) Regression risks
+## 5) Next smallest step
+```
+
+## 质量门禁
+
+- 必须给出“最小 patch 序列”，而不是泛泛建议。
+- 每条建议必须映射到具体错误或日志证据。
+- 不确定时显式标注假设，不编造 API 细节。
+- 输出长度控制：优先 5-12 条高价值动作，避免冗长。
+
+## 高效模式（30分钟）
+
+当用户明确要“先救火再完善”时，切换到高效模式：
+- 最多执行 3 条命令：`build`、`dmesg`、`grep`。
+- 只输出前 3 个阻塞问题和对应最小修复动作。
+- 每个动作要求“可在 10 分钟内验证”。
+
+## 参考资料
+
+- 优先查阅：`references/source-map.md`
+- 快速上手：`references/getting-started.md`
+- 接口迁移核对表：`references/api-migration-checklist.md`
+- 原始 Markdown 文档目录：`/home/ares/yyskills/output/linux-kernel-labs-md/`

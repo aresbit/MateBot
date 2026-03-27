@@ -1,0 +1,271 @@
+meta =
+  name = modern-c-dev
+  version = 1
+
+title = modern-c-dev
+
+skill =
+  name = modern-c-dev
+  description =
+    Claude-optimized modern C skill from sysprog c-prog notes.
+    Use this skill for modern C language engineering tasks, especially when you need:
+    - Memory management, pointer manipulation, and alignment guidance
+    - Compiler toolchain behavior, optimization, and ABI understanding
+    - Undefined behavior analysis and safety checklists
+    - Low-level optimization and bitwise operations
+    - Function calling conventions and control flow patterns
+    - Stream I/O, EOF handling, and error patterns
+    - Object-oriented design patterns in C
+    - Preprocessor techniques and macro safety
+    - Dynamic linking and ELF format understanding
+    - Linked list and non-contiguous memory operations
+
+    Trigger this skill whenever the user mentions C programming, memory issues,
+    pointer bugs, compiler warnings, undefined behavior, or low-level system programming.
+  entry = SKILL.spcl
+  refs =
+    = references/00-index-c-prog.md
+    = references/01-bitwise-operations.md
+    = references/02-floating-point.md
+    = references/03-c-programming-intro.md
+    = references/04-c-deep-dive.md
+    = references/05-c-runtime-library.md
+    = references/06-c-standards.md
+    = references/07-stream-io.md
+    = references/08-undefined-behavior.md
+    = references/09-goto-control-flow.md
+    = references/10-server-framework.md
+    = references/11-character-encoding-data-structures.md
+    = references/12-memory-management-alignment.md
+    = references/13-compiler-principles.md
+    = references/14-oop-in-c.md
+    = references/15-dynamic-linker.md
+    = references/17-c-tips-and-tricks.md
+    = references/18-preprocessor.md
+    = references/19-pointers.md
+    = references/20-function-calling.md
+    = references/21-compiler-optimization.md
+    = references/22-linker-elf.md
+    = references/23-linked-list-memory.md
+  extras =
+    = assets/
+    = evals/
+    = scripts/
+
+purpose =
+  This skill provides practical guidance for modern C language engineering tasks,
+  sourced from the comprehensive "你所不知道的 C 語言" (Things You Don't Know About C)
+  lecture series by sysprog.
+
+quick_reference_index =
+  topic =
+    name = Bitwise Operations
+    file = references/01-bitwise-operations.md
+    when_to_use = Bit manipulation, flags, masks
+  topic =
+    name = Floating Point
+    file = references/02-floating-point.md
+    when_to_use = FP precision, IEEE 754, NaN/Inf
+  topic =
+    name = C Intro
+    file = references/03-c-programming-intro.md
+    when_to_use = Language overview
+  topic =
+    name = C Deep Dive
+    file = references/04-c-deep-dive.md
+    when_to_use = Advanced concepts
+  topic =
+    name = CRT
+    file = references/05-c-runtime-library.md
+    when_to_use = Runtime library internals
+  topic =
+    name = C Standards
+    file = references/06-c-standards.md
+    when_to_use = C99/C11/C17 differences
+  topic =
+    name = Stream I/O
+    file = references/07-stream-io.md
+    when_to_use = EOF handling, buffering
+  topic =
+    name = Undefined Behavior
+    file = references/08-undefined-behavior.md
+    when_to_use = UB detection and avoidance
+  topic =
+    name = Control Flow
+    file = references/09-goto-control-flow.md
+    when_to_use = goto, switch, coroutines
+  topic =
+    name = Server Framework
+    file = references/10-server-framework.md
+    when_to_use = Network programming patterns
+  topic =
+    name = Encoding/DS
+    file = references/11-character-encoding-data-structures.md
+    when_to_use = UTF-8, data structures
+  topic =
+    name = Memory Management
+    file = references/12-memory-management-alignment.md
+    when_to_use = malloc, alignment, cache
+  topic =
+    name = Compiler Principles
+    file = references/13-compiler-principles.md
+    when_to_use = Compiler internals
+  topic =
+    name = OOP in C
+    file = references/14-oop-in-c.md
+    when_to_use = Object-oriented patterns
+  topic =
+    name = Dynamic Linker
+    file = references/15-dynamic-linker.md
+    when_to_use = dlopen, dlsym, PLT/GOT
+  topic =
+    name = Tips & Tricks
+    file = references/17-c-tips-and-tricks.md
+    when_to_use = Idioms and techniques
+  topic =
+    name = Preprocessor
+    file = references/18-preprocessor.md
+    when_to_use = Macros, conditional compilation
+  topic =
+    name = Pointers
+    file = references/19-pointers.md
+    when_to_use = Pointer arithmetic, void*
+  topic =
+    name = Function Calling
+    file = references/20-function-calling.md
+    when_to_use = ABI, stack frame, calling conventions
+  topic =
+    name = Compiler Optimization
+    file = references/21-compiler-optimization.md
+    when_to_use = Optimization flags, techniques
+  topic =
+    name = Linker & ELF
+    file = references/22-linker-elf.md
+    when_to_use = Linking, ELF format
+  topic =
+    name = Linked Lists
+    file = references/23-linked-list-memory.md
+    when_to_use = List operations, memory
+
+task_routing_guide =
+  memory_and_pointer_issues =
+    pointer_bugs = references/19-pointers.md
+    memory_management = references/12-memory-management-alignment.md
+    linked_lists = references/23-linked-list-memory.md
+  compilation_and_toolchain =
+    compiler_warnings_errors =
+      = references/13-compiler-principles.md
+      = references/21-compiler-optimization.md
+    linker_issues =
+      = references/22-linker-elf.md
+      = references/15-dynamic-linker.md
+    preprocessor_macros = references/18-preprocessor.md
+  code_safety_and_ub =
+    undefined_behavior = references/08-undefined-behavior.md
+    safety_checklist = Cross-reference 08-undefined-behavior.md and 19-pointers.md
+  performance_and_optimization =
+    bitwise_operations = references/01-bitwise-operations.md
+    compiler_optimizations = references/21-compiler-optimization.md
+    memory_alignment = references/12-memory-management-alignment.md
+  control_flow_and_design =
+    goto_switch_patterns = references/09-goto-control-flow.md
+    oop_patterns_in_c = references/14-oop-in-c.md
+    function_calling = references/20-function-calling.md
+  io_and_encoding =
+    stream_io = references/07-stream-io.md
+    character_encoding = references/11-character-encoding-data-structures.md
+
+c_programming_techniques =
+  safe_goto_patterns =
+    description = Use goto for centralized error handling (from 09-goto-control-flow.md)
+    example =
+      int process_data() {
+          void *buffer = NULL;
+          FILE *fp = NULL;
+          int status = -1;
+
+          buffer = malloc(BUF_SIZE);
+          if (!buffer) goto cleanup;
+
+          fp = fopen("data.txt", "r");
+          if (!fp) goto cleanup;
+
+          // ... process data ...
+          status = 0;
+
+      cleanup:
+          if (fp) fclose(fp);
+          free(buffer);
+          return status;
+      }
+  duffs_device =
+    description = Loop Unrolling
+    example =
+      void copy(char *to, char *from, int count) {
+          int n = (count + 7) / 8;
+          switch (count % 8) {
+              case 0: do { *to++ = *from++;
+              case 7:      *to++ = *from++;
+              case 6:      *to++ = *from++;
+              case 5:      *to++ = *from++;
+              case 4:      *to++ = *from++;
+              case 3:      *to++ = *from++;
+              case 2:      *to++ = *from++;
+              case 1:      *to++ = *from++;
+                      } while (--n > 0);
+          }
+      }
+  multi_line_macro_safety =
+    description = Always wrap multi-line macros in `do { ... } while (0)`
+    example =
+      #define SAFE_FREE(ptr) do { \
+          free(ptr); \
+          (ptr) = NULL; \
+      } while (0)
+  container_of_macro =
+    description = OOP in C
+    example =
+      #define container_of(ptr, type, member) ({ \
+          const typeof(((type *)0)->member) *__mptr = (ptr); \
+          (type *)((char *)__mptr - offsetof(type, member)); \
+      })
+
+output_style_guidelines =
+  When answering C programming questions:
+  1. Explain assumptions - State what you're assuming about the platform (32/64-bit, endianness)
+  2. Distinguish spec vs implementation - Clarify what's guaranteed by C standard vs compiler-specific
+  3. Provide minimal examples - Show concise, compilable code snippets
+  4. Include risk notes - Warn about UB, aliasing, alignment, and overflow
+  5. Reference sources - Point to specific reference files for deep dives
+
+common_pitfalls =
+  undefined_behavior_to_avoid =
+    = Signed integer overflow
+    = Null pointer dereference
+    = Array bounds violation
+    = Strict aliasing violations
+    = Uninitialized variable use
+  safe_practices =
+    = Use `size_t` for sizes and indices
+    = Check malloc return values
+    = Prefer `const` correctness
+    = Initialize all variables
+    = Use static analysis tools
+
+scripts =
+  description = The `scripts/` directory may contain helper scripts
+  scripts =
+    find_pattern_sh = Search for C idioms across the references
+    extract_examples_sh = Extract code examples from reference files
+  usage_example =
+    To use scripts:
+    ```bash
+    cd /home/ares/yyskills/output/modern-c-dev
+    ./scripts/find-pattern.sh "Duff's Device"
+    ```
+
+resolve =
+  merge = deep
+  conflict = right-bias
+  fixpoint = true
+  max_iter = 64
