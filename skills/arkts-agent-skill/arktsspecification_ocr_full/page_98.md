@@ -1,0 +1,1 @@
+A numeric casting conversion from an integer type to a smaller integer type I discards all bits except the N lowest ones, where N is the number of bits used to represent type I. This conversion can lose the information on the magnitude of the numeric value. The sign of the resulting value can differ from that of the original value.
