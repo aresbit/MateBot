@@ -1,25 +1,9 @@
-# modern-c-makefile-and-then-spclib-skill-and-then-modern-c-dev
+---
+name: c-skill
+description: Composite C skill that chains modern-c-makefile, spclib, and modern-c-dev.
+version: 1
+---
 
-组合技能，按顺序串联以下能力：
-
-- `modern-c-makefile`: This skill provides guidance and templates for creating clean, maintainable Makefiles for modern C/C++ projects, based on the best practices demonstrated in the [gnaro project](https://github.com/lucavallin/gnaro). It helps structure build systems that integrate compilation, testing, linting, formatting, and dependency management in a clear and organized way.
-- `spclib-skill`: This skill should be used when the user asks to "write C code with sp.h", "use spclib", "sp.h API", "single-header C library",
-"modern C programming", "sp_str_t usage", "sp_alloc memory", "SP_LOG formatting", "dynamic array in C", "hash table in C",
-"cross-platform C code", or when working with the sp.h single-header C standard library replacement.
-- `modern-c-dev`: Claude-optimized modern C skill from sysprog c-prog notes.
-Use this skill for modern C language engineering tasks, especially when you need:
-- Memory management, pointer manipulation, and alignment guidance
-- Compiler toolchain behavior, optimization, and ABI understanding
-- Undefined behavior analysis and safety checklists
-- Low-level optimization and bitwise operations
-- Function calling conventions and control flow patterns
-- Stream I/O, EOF handling, and error patterns
-- Object-oriented design patterns in C
-- Preprocessor techniques and macro safety
-- Dynamic linking and ELF format understanding
-- Linked list and non-contiguous memory operations
-
-<!-- SPCL:BEGIN -->
 meta =
   name =
     modern-c-makefile =
@@ -762,5 +746,3 @@ scripts =
     cd /home/ares/yyskills/output/modern-c-dev
     ./scripts/find-pattern.sh "Duff's Device"
     ``` =
-
-<!-- SPCL:END -->
