@@ -1,0 +1,219 @@
+# edm工具
+
+- slug: `edm-tool`
+- updatedDate: `2026-03-30 08:12:29`
+- source: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/edm-tool
+- navigationAddress: `/hmos/hmos-dp1`
+
+# edm工具
+
+Enterprise Device Manager（企业设备管理工具，简称为edm），为设备管理应用提供调试和测试能力，例如激活企业设备管理拓展能力、解除激活企业设备管理拓展能力。
+
+#### 环境要求
+
+在使用本工具前，开发者需要先获取hdc工具，执行hdc shell。
+
+#### edm工具命令列表
+
+#### 帮助命令（help）
+
+```bash
+# 显示帮助信息
+edm help
+```
+
+#### 激活命令（enable-admin）
+
+```bash
+# 显示帮助信息
+edm enable-admin -h
+# 激活
+edm enable-admin -n <bundleName> -a <abilityName> [-t <adminType>]
+```
+
+激活命令参数列表
+
+可选参数，adminType。
+
+取值如下：
+
+super - 表示激活为超级设备管理应用。
+
+byod - 表示激活为BYOD（自带设备办公）设备管理应用。
+
+缺省值为super。
+
+示例
+：
+
+```bash
+# 激活一个所在应用包名为com.example.mdmsample，类名为EnterpriseAdminAbility的EnterpriseAdminExtensionAbility。
+edm enable-admin -n com.example.mdmsample -a com.example.mdmsample.EnterpriseAdminAbility
+# 执行结果
+enable-admin success.
+```
+
+#### 解除激活命令（disable-admin）
+
+```bash
+# 显示帮助信息
+edm disable-admin -h
+# 解除激活
+edm disable-admin -n <bundleName>
+```
+
+解除激活命令参数列表
+
+示例
+：
+
+```bash
+# 解除激活所在应用包名为com.example.mdmsample的EnterpriseAdminExtensionAbility。
+edm disable-admin -n com.example.mdmsample
+# 执行结果
+disable-admin success.
+```
+
+#### edm工具错误信息
+
+#### [h2]error: command requires option
+
+错误描述
+
+未传入bundleName和abilityName。
+
+可能原因
+
+未传入bundleName和abilityName。
+
+处理步骤
+
+1、如果当前使用的命令是enable-admin，请补充-n <bundle-name>和-a <ability-name>参数。
+
+2、如果当前使用的命令是disable-admin，请补充-n <bundle-name>参数。
+
+#### [h2]error: -n, --bundle-name option requires an argument
+
+错误描述
+
+传入的bundleName为空。
+
+可能原因
+
+传入的bundleName为空。
+
+处理步骤
+
+检查-n后的参数，请补充bundleName。
+
+#### [h2]error: -a, --ability-name option requires an argument
+
+错误描述
+
+传入的abilityName为空。
+
+可能原因
+
+传入的abilityName为空。
+
+处理步骤
+
+检查-a后的参数，请补充abilityName。
+
+#### [h2]error: unknown option
+
+错误描述
+
+传入了未知的参数。
+
+可能原因
+
+传入了未知的参数。
+
+处理步骤
+
+请确认参数是否在参数列表中。
+
+#### [h2]error: -n <bundle-name> is expected
+
+错误描述
+
+未传入bundleName。
+
+可能原因
+
+未传入bundleName。
+
+处理步骤
+
+请补充-n <bundle-name>。
+
+#### [h2]error: -a <ability-name> is expected
+
+错误描述
+
+未传入abilityName。
+
+可能原因
+
+未传入abilityName。
+
+处理步骤
+
+请补充-a <ability-name>。
+
+#### [h2]9200003 error: the administrator ability component is invalid
+
+错误描述
+
+传入的bundleName或者abilityName不正确或者不是enterpriseAdmin类型的ExtensionAbility。
+
+可能原因
+
+1、传入的bundleName不正确。
+
+2、传入的abilityName不正确。
+
+3、传入的不是enterpriseAdmin类型的ExtensionAbility。
+
+处理步骤
+
+查询应用的bundleName和enterpriseAdmin类型的ExtensionAbility的abilityName，并将其传入到参数中。
+
+#### [h2]9200004 error: failed to enable the administrator application of the device
+
+错误描述
+
+激活失败。
+
+可能原因
+
+1、传入的bundleName不正确。
+
+2、传入的不是enterpriseAdmin类型的ExtensionAbility。
+
+3、存在已激活的正式的enterpriseAdmin类型的ExtensionAbility。
+
+处理步骤
+
+1、查询应用的bundleName和enterpriseAdmin类型的ExtensionAbility的abilityName，并将其传入到参数中。
+
+2、请使用未被管控的设备进行调试。
+
+#### [h2]9200005 error: failed to disable the administrator application of the device
+
+错误描述
+
+解除激活失败。
+
+可能原因
+
+1、此组件未被激活。
+
+2、此组件不是通过hdc命令被激活的。
+
+3、解除激活失败。
+
+处理步骤
+
+查询可以被hdc命令解除激活的应用的bundleName，并将其传入到参数中。
