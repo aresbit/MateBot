@@ -1,29 +1,53 @@
-# Getting Started (Driver Modernization)
+# Kernel Development Quickstart
 
-## 目标
+Use this document for first-pass kernel triage and implementation guidance.
 
-在最短时间内把旧驱动从“编译失败”拉回到“可编译、可加载、可做基础验证”。
+## 1. Establish baseline
 
-## 30 分钟救火流程
+- Capture kernel version and architecture.
+- Run one full build or capture one full runtime trace.
+- Keep raw evidence unchanged for comparison.
 
-1. 保存基线错误
-- `make -C /lib/modules/$(uname -r)/build M=$PWD V=1 modules > build.log 2>&1`
-- 只截取前 50 行首个报错链。
+## 2. Identify subsystem
 
-2. 定位第一阻塞
-- 先修类型/宏/函数签名变更。
-- 暂不处理风格告警和性能优化。
+Classify the issue into one primary subsystem:
 
-3. 单主题改动 + 复编译
-- 一次只修一类问题。
-- 每次改动后立即 `make` 验证。
+- module
+- syscall
+- process/scheduler
+- interrupt/deferred work
+- locking/SMP
+- memory subsystem
+- filesystem/VFS
+- networking
+- architecture
+- device model
+- debugging/profiling
 
-4. 最小运行验证
-- `insmod` 或 `modprobe`
-- 检查 `dmesg` 中 `probe`/`remove`/irq 关键日志
+## 3. Pick material
 
-## 不要做的事
+Use `source-map.md` and load one primary file only.
+If blocked, load one secondary file.
 
-- 不要在首轮迁移做大规模重构。
-- 不要在缺乏证据时猜测 API 行为。
-- 不要跨多个模块同时改动。
+## 4. Apply smallest fix
+
+- Change one theme at a time.
+- Preserve rollback ability.
+- Avoid broad refactor during unstable baseline.
+
+## 5. Verify with signal
+
+Every proposed step must include one expected signal:
+
+- compile output movement
+- runtime log signal (`dmesg` marker)
+- subsystem behavior evidence (e.g., IRQ registration, copy boundary, wake path)
+
+## 6. Deliver minimal report
+
+- subsystem + failure class
+- evidence used
+- file path(s) consulted under `references/`
+- smallest patch sequence
+- verification command and expected signal
+- one risk/assumption

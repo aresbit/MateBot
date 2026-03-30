@@ -1,46 +1,44 @@
-# Linux Kernel Labs Source Map
+# Kernel Development Source Map
 
-以下文档来自已完成的 HTML→Markdown 转换结果，路径根目录：
+This skill uses local materials already normalized under `references/`.
 
-`/home/ares/yyskills/output/linux-kernel-labs-md/`
+## Primary content roots
 
-## 快速入口
+- `references/labs/`: implementation-focused API usage and coding patterns
+- `references/lectures/`: subsystem theory, architecture, and debugging model
+- `references/so2/`: course-specific variants, assignments, and extra walkthroughs
+- `references/info/`: environment and setup notes
 
-- 首页:
-`/home/ares/yyskills/output/linux-kernel-labs-md/index.md`
+## Routing by subsystem
 
-- 主文档索引:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/index.md`
+| Subsystem | First file | Second file |
+| --- | --- | --- |
+| Module lifecycle | `references/labs/kernel_modules.md` | `references/labs/introduction.md` |
+| Syscall and user boundary | `references/lectures/syscalls.md` | `references/lectures/processes.md` |
+| Process/scheduler | `references/lectures/processes.md` | `references/lectures/smp.md` |
+| Interrupt path | `references/labs/interrupts.md` | `references/lectures/interrupts.md` |
+| Deferred work | `references/labs/deferred_work.md` | `references/lectures/interrupts.md` |
+| SMP and locking | `references/lectures/smp.md` | `references/labs/kernel_api.md` |
+| Memory subsystem | `references/lectures/memory-management.md` | `references/labs/memory_mapping.md` |
+| Filesystem/VFS | `references/lectures/fs.md` | `references/labs/filesystems_part1.md` |
+| Networking | `references/lectures/networking.md` | `references/labs/networking.md` |
+| Architecture | `references/lectures/arch.md` | `references/labs/arm_kernel_development.md` |
+| Debugging/profiling | `references/lectures/debugging.md` | `references/labs/kernel_profiling.md` |
+| Device model | `references/labs/device_model.md` | `references/labs/device_drivers.md` |
 
-## 核心实验主题
+## Search anchors
 
-- 字符设备:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/labs/device_drivers.md`
+When scanning material quickly, start with these anchors:
 
-- 内存映射:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/labs/memory_mapping.md`
+- `copy_to_user`, `copy_from_user`
+- `request_irq`, `spin_lock`, `mutex`
+- `timer`, `workqueue`, `wait_event`
+- `vmalloc`, `mmap`
+- `struct file_operations`, `kobject`
+- `oops`, `KASAN`, `lockdep`
 
-- 中断:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/labs/interrupts.md`
+## Usage contract
 
-- 延迟工作:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/labs/deferred_work.md`
-
-- 文件系统:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/labs/filesystems_part1.md`
-
-- 网络:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/labs/networking.md`
-
-## Lecture 入口
-
-- 课程目录:
-`/home/ares/yyskills/output/linux-kernel-labs-md/refs/heads/master/lectures/`
-
-- 示例:
-`intro.md`, `processes.md`, `interrupts.md`, `memory-management.md`, `networking.md`
-
-## 使用建议
-
-- 先查“实验”文档拿 API 迁移线索，再用 lecture 文档补背景。
-- 遇到接口演进问题，优先定位同主题实验章节中的代码片段。
+- Choose one primary subsystem before proposing a patch.
+- Cite exact file paths from `references/labs` or `references/lectures`.
+- Keep the first fix minimal and verifiable.

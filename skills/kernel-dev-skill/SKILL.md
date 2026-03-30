@@ -1,111 +1,148 @@
 ---
 name: kernel-dev-skill
-description: 以最小改动现代化 Linux 内核驱动并恢复编译/运行；当用户提到驱动移植、内核升级不兼容、API 过时、DKMS 或 probe/remove 问题时立即使用。
+description: Linux kernel development skill grounded in local references/labs and references/lectures materials. Use for kernel modules, system calls, process scheduling, interrupts, locking, memory management, filesystems, networking, architecture, debugging, profiling, and device model work.
 ---
 
-# Linux Kernel Driver Modernization
+# Linux Kernel Development
 
-核心准则：`简单优于一切`。优先最小改动、可回滚、可验证的修复路径。
+Core rule: `simple is superior to everything`.
 
-## 何时使用
+This skill is for practical kernel engineering. Use it to analyze failures, choose the smallest relevant subsystem material, make minimal verifiable changes, and validate with evidence.
 
-在以下场景直接使用本技能：
-- 旧驱动在新内核（如 5.x/6.x）编译失败
-- 运行时报 probe 失败、符号缺失、结构体字段变化
-- 需要把 out-of-tree 驱动迁移到新 API
-- 需要给出“先能编译，再逐步正确”的改造方案
+## Use this skill when
 
-## 输入清单
+- Kernel code fails to build or run on a target kernel
+- A module, subsystem patch, or lab skeleton needs implementation
+- You need help on process, syscall, interrupt, SMP, memory, filesystem, networking, or architecture topics
+- You are decoding oops/panic, lock bugs, memory bugs, or performance regressions
+- You are working on device-model or driver-adjacent kernel paths
 
-先收集最小必要信息，避免过度分析：
-- 目标内核版本与发行版
-- 驱动源码路径、`Kbuild/Makefile`
-- 第一批编译错误（前 50 行）
-- 运行时关键日志：`dmesg` 中对应模块片段
-- 硬件总线类型（PCI/I2C/SPI/Platform/USB）
+## Scope
 
-## 执行顺序（最短路径）
+Includes:
 
-1. 先复现失败并冻结基线：只跑一次完整构建，保存原始错误。
-2. 按“编译阻塞优先级”修复：先类型/API/宏，再语义行为。
-3. 每次只做一类改动并重新编译，保证可回滚。
-4. 编译通过后再做最小运行验证（加载、probe、基本 IO）。
-5. 最后补静态检查和回归清单。
+- kernel modules and build flow
+- kernel API and execution context rules
+- system calls and process interactions
+- interrupts and deferred work
+- SMP and synchronization
+- memory management and mapping
+- filesystems and VFS-facing logic
+- networking stack and net path basics
+- architecture layer and portability concerns
+- debugging and profiling
+- device and driver model
 
-## 常见现代化改造清单
+## Coverage contract
 
-按出现频率从高到低排查：
-- `file_operations`/`proc_ops` 结构差异
-- `timer_list` 新接口与回调签名变化
-- `get_user_pages*`、DMA 映射、内存 API 变化
-- `irq` 注册/释放、`devm_*` 资源管理替换
-- `strlcpy`/`scnprintf`/`min_t` 等安全接口替换
-- 内核日志级别与 `pr_*` 规范化
-- `of_*`/`acpi_*` 匹配和设备树兼容字段
+When responding, ensure the chosen path explicitly maps to one of these kernel components:
 
-## 最小改动策略
+- module lifecycle
+- syscall boundary
+- process/scheduler path
+- interrupts/deferred work
+- locking/SMP behavior
+- memory subsystem (allocation, mapping, lifetime, reclaim-facing assumptions)
+- filesystem/VFS path
+- networking path
+- architecture portability
+- debugging/profiling or device model
 
-- 先兼容层，后重构：优先加薄封装宏/静态内联函数，不先大改架构。
-- 不跨文件大搬迁：单次变更限定在单一主题。
-- 不提前优化：先让代码正确，再谈性能与风格统一。
-- 用内核已有 helper，不重复造轮子。
+If the issue touches memory, call out which memory aspect is involved:
 
-## 诊断命令
+- allocation/lifetime (`kmalloc`, `vmalloc`, `kzalloc`, free path symmetry)
+- user/kernel copy boundary
+- mapping or virtual memory behavior (`mmap`, vm area assumptions)
+- context safety (sleeping/atomic constraints)
+
+Excludes:
+
+- pure user-space programs
+- generic Linux administration without kernel code
+
+## Required inputs
+
+Collect minimal hard evidence before proposing a patch:
+
+- target kernel version, distro, architecture
+- source path and build entry (`Makefile` / `Kbuild` / target)
+- first failing build log or runtime log
+- subsystem guess: module, syscall, process, irq, memory, fs, net, arch, driver, or unknown
+- desired outcome: compile fix, runtime fix, behavior change, or learning implementation
+
+## Workflow
+
+1. Freeze baseline.
+   Run one build or collect one complete runtime failure trace.
+2. Classify failure.
+   Place blockers into one class: API break, context violation, concurrency, memory, lifecycle, functional bug, or performance issue.
+3. Route to one reference first.
+   Use [references/source-map.md](references/source-map.md) to pick the smallest matching file from `references/labs` or `references/lectures`.
+4. Patch one theme per step.
+   Avoid mixing unrelated refactors.
+5. Verify immediately.
+   Rebuild and run one focused check that proves the specific blocker moved.
+6. Expand only after proof.
+   After the first fix is validated, handle next blocker.
+
+## Hard rules
+
+- Minimal, reversible, evidence-based changes.
+- No API claims without code/log evidence.
+- Do not redesign architecture while baseline is broken.
+- Do not hide uncertainty; label assumptions and provide next confirming command.
+- Keep recommendations subsystem-specific, not generic Linux advice.
+
+## Command set
 
 ```bash
 make -C /lib/modules/$(uname -r)/build M=$PWD V=1 modules
-```
-
-```bash
 make -C /lib/modules/$(uname -r)/build M=$PWD W=1 C=1 modules
-```
-
-```bash
-sparse -Wbitwise -Wcontext -Wcast-to-as -Wdefault-bitfield-sign -Wno-transparent-union
-```
-
-```bash
-scripts/checkpatch.pl --strict --max-line-length=100 -f <changed_file.c>
-```
-
-```bash
-coccicheck MODE=report M=$PWD
-```
-
-```bash
 dmesg -T | tail -n 200
+scripts/checkpatch.pl --strict -f path/to/file.c
 ```
 
-## 输出模板
+Add subsystem commands only when they directly test the current blocker.
 
-始终按以下结构输出，保持简洁：
+## Subsystem verification rule
+
+For the selected subsystem, include at least one verification step with an expected signal:
+
+- memory: allocator path, user-copy return handling, or mapping behavior check
+- interrupts: handler registration and interrupt-path signal in logs
+- process/scheduler: task state transition or wake/sleep behavior evidence
+- filesystem: VFS callback path evidence
+- networking: packet path or interface state transition evidence
+- syscall boundary: errno and copy boundary behavior evidence
+
+## Output format
 
 ```text
-# Modernization Plan
-## 1) Build blockers (must-fix first)
-## 2) Minimal patch set (ordered, reversible)
-## 3) Runtime smoke checks
-## 4) Regression risks
-## 5) Next smallest step
+1. Subsystem and failure class
+2. Evidence used
+3. Relevant local material
+4. Smallest patch sequence
+5. Verification step and expected signal
+6. Risks / assumptions
 ```
 
-## 质量门禁
+Output must satisfy all items:
 
-- 必须给出“最小 patch 序列”，而不是泛泛建议。
-- 每条建议必须映射到具体错误或日志证据。
-- 不确定时显式标注假设，不编造 API 细节。
-- 输出长度控制：优先 5-12 条高价值动作，避免冗长。
+- name one primary kernel component from the coverage contract
+- cite the local material file used for that component (`references/labs/*.md` or `references/lectures/*.md`)
+- provide one concrete verification step with expected signal
+- if subsystem is unknown, state the shortest command to disambiguate it
 
-## 高效模式（30分钟）
+## Fast mode
 
-当用户明确要“先救火再完善”时，切换到高效模式：
-- 最多执行 3 条命令：`build`、`dmesg`、`grep`。
-- 只输出前 3 个阻塞问题和对应最小修复动作。
-- 每个动作要求“可在 10 分钟内验证”。
+For firefighting requests:
 
-## 参考资料
+- show top 3 blockers only
+- map each blocker to one local reference
+- provide smallest next patch and one verification step
 
-- 优先查阅：`references/source-map.md`
-- 快速上手：`references/getting-started.md`
-- 接口迁移核对表：`references/api-migration-checklist.md`
-- 原始 Markdown 文档目录：`/home/ares/yyskills/output/linux-kernel-labs-md/`
+## References
+
+- [references/source-map.md](references/source-map.md)
+- [references/getting-started.md](references/getting-started.md)
+- [references/api-migration-checklist.md](references/api-migration-checklist.md)

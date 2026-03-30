@@ -1,39 +1,55 @@
-# API Migration Checklist
+# Kernel Development Checklist
 
-按下面顺序逐项排查，命中则最小修复：
+This checklist is for general kernel engineering across subsystems.
 
-## 1. file/proc 接口
+## A. Build and interface integrity
 
-- `struct file_operations` 是否需要迁移到新字段命名
-- `proc_create` 场景是否改为 `proc_ops`
+- callback signatures match target kernel APIs
+- required headers, macros, and helpers are available
+- structure field usage matches current definitions
 
-## 2. timer 与延迟执行
+## B. Execution context correctness
 
-- `timer_setup` 与回调签名是否匹配
-- tasklet/workqueue 是否仍符合当前上下文约束
+- no sleeping in atomic or interrupt context
+- user-space access uses kernel copy helpers
+- stack usage remains bounded and non-recursive for hot paths
 
-## 3. 资源与生命周期
+## C. Concurrency and ordering
 
-- 优先 `devm_*` 管理资源
-- `probe` 失败路径是否完整释放
+- shared state is lock-protected in all contexts
+- irq/process lock interactions are deadlock-safe
+- SMP/preempt assumptions are explicit and verified
 
-## 4. 内存与用户态拷贝
+## D. Memory subsystem checks
 
-- `copy_to_user/copy_from_user` 返回值处理
-- `get_user_pages*` 新旧调用差异
+- allocation/free paths are symmetric on success and failure
+- mapping assumptions (`mmap`/vm area) are valid for the path
+- user/kernel copy boundaries are validated
+- lifetime and ownership of pointers are explicit
 
-## 5. 中断与并发
+## E. Subsystem contract checks
 
-- `request_irq/free_irq` 参数一致性
-- 自旋锁/原子变量/屏障是否仍满足语义
+- syscall: errno, ABI semantics, user boundary
+- process/scheduler: state transition and wake/sleep behavior
+- interrupt/deferred: registration, handler safety, deferred handoff
+- filesystem: VFS callback contract and object lifetime
+- networking: state machine and path transition integrity
+- device model: register/probe/remove symmetry
 
-## 6. 日志与诊断
+## F. Runtime-first debugging
 
-- 用 `pr_*` 替代裸 `printk` 风格
-- 错误路径必须给可定位日志
+- oops/panic: resolve crash symbol and call chain first
+- hang/deadlock: isolate lock/wait source first
+- corruption: run memory/debug tooling path first
 
-## 7. 回归点
+## G. Verification gates
 
-- 模块加载/卸载
-- 基本 IO path
-- suspend/resume（若适用）
+- build confirms blocker moved
+- one subsystem-specific runtime signal passes
+- no new high-severity warning in touched code
+
+## H. Cleanup after stability
+
+- normalize logs and error paths
+- remove obsolete compatibility branches carefully
+- style cleanup only after behavior is stable
