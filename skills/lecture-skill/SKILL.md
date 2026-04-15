@@ -1,50 +1,275 @@
 ---
 name: lecture-skill
-description: Use skill-seekers to build a unified lecture skill from local PDFs, package for Claude, and troubleshoot common config/CLI errors.
+description: |
+  CS 课程系统性学习 Skill。融合横纵分析法与结构化写作质检体系，用于深度学习一门计算机科学课程（含 lecture notes、syllabus、paper list），最终输出一份结构完整、有个人洞察的学习报告。
+  触发词包括但不限于：学习这门课、帮我梳理一下这个课程、研究一下这门 CS 课程、输出学习报告、课程分析、lecture notes 整理、帮我搞懂这门课。
+  适用于用户丢来一个课程主页（如 https://cs.brown.edu/courses/csci1650/）说"帮我学习一下"或"帮我写个学习报告"的场景。
+  不要用于简单名词解释（如"什么是 OS"），也不要用于写公众号文章。
 ---
 
-# Lecture Skill
+# CS 课程系统性学习
 
-Create a reusable skill from many lecture PDFs with `skill-seekers unified`.
+你正在执行一次 CS 课程的系统性深度学习，最终产出一份**结构完整、有个人洞察的学习报告**。
 
-## When To Use
+## 核心方法论
 
-Use this skill when you need to:
-- Build one merged skill from many lecture PDFs.
-- Avoid `create --target` errors in modern `skill-seekers`.
-- Write or fix a unified `config.json`.
-- Package and install the final skill for Claude.
+本 Skill 的核心原则是：**纵向追知识深度，横向追资源广度，交汇出学习策略与个人洞察**。
 
-## Quick Workflow
+- **纵轴**：追踪课程涉及知识领域的起源、关键论文、版本迭代、概念演进，以及该课程自身的教学脉络（从 syllabus 第一周到最后一周的知识建构逻辑）。
+- **横轴**：以当前时间点为切面，将该课程与同类顶级课程（MIT/Stanford/CMU/Berkeley 等）进行对比，识别差异化视角与资源互补。
+- **交汇点**：基于纵轴的历史脉络与横轴的资源对比，给出针对该课程的**最优学习路径、隐藏的难点预警、以及个人化的知识串联建议**。
 
-1. Prepare config from template:
-- See [references/config.unified.template.json](references/config.unified.template.json)
+---
 
-2. Run unified build:
-```bash
-skill-seekers unified --config arch-config.json
+## 前置准备
+
+### 明确研究对象
+
+拿到用户输入后，确认以下信息。如果用户直接给了一个课程 URL，不需要追问，直接开始：
+
+1. **课程主页 URL**：课程的官方网站或 syllabus 页面
+2. **课程名称与编号**：如 CSCI 1650
+3. **开课院校与教授**：如 Brown University, Prof. XXX
+4. **特别关注点**（可选）：用户是否有特定想深入的方向？如 "重点帮我看 project 部分"、"我想知道前置知识要求"
+
+### 环境检查
+
+- 检查 PDF 转换脚本是否可用（本 Skill 自带 `scripts/md_to_pdf.py`，基于 WeasyPrint）。依赖安装命令：`pip install weasyprint markdown --break-system-packages`
+- 检查是否有 web-access skill 可用（路径 `/mnt/.claude/skills/web-access/SKILL.md`），优先使用其浏览器 CDP 能力获取课程页面中的动态内容。
+
+---
+
+## 第一步：联网信息收集
+
+研究报告的质量取决于信息的丰富度和准确性。**必须联网搜索**，不能仅靠已有知识。
+
+### 并行搜索策略
+
+使用子 Agent 并行搜索提高效率。建议分工：
+
+- **子 Agent 1 — 课程纵轴信息**：
+  - 用 WebFetch 完整抓取课程 syllabus、lecture notes、schedule、reading list
+  - 提取每周主题、核心概念、必读 paper、assignment/project 设计
+  - 调研该课程涉及的核心技术/概念的起源与发展（关键论文、里程碑版本、算法迭代）
+
+- **子 Agent 2 — 课程横轴信息**：
+  - 搜索同类课程：同一主题在 MIT/Stanford/CMU/Berkeley 等校的课程编号与 syllabus
+  - 搜索该课程的替代学习资源：经典教材、YouTube 公开课、OCW、著名 blog/tutorial
+  - 搜索该教授的学术背景和研究方向（帮助理解课程视角）
+
+- **子 Agent 3 — 社区与口碑**（复杂课程才需要）：
+  - 搜索学生对这门课的评价（Reddit、知乎、Course Hero、GitHub 上的 project 实现）
+  - 搜索该课程的历年考试/作业难度讨论
+
+**子 Agent 联网工具使用指南**（写入每个子 Agent 的 prompt）：
+
+> 你需要联网获取信息。使用以下工具：
+> - **WebSearch**：用于搜索发现信息来源
+> - **WebFetch**：当已知具体 URL 时，定向提取页面内容
+> - 如果环境中安装了 web-access skill，优先加载它并遵循其指引
+> - 搜索策略：先用 WebSearch 发现线索，找到具体 URL 后用 WebFetch 深入提取
+> - 多次搜索、多个关键词组合，不要只搜一次就放弃
+> - 一手来源优于二手来源：课程官方页面 > 教授个人主页 > 权威学术资源 > 社区讨论
+> - **学术类内容必查 arXiv/Google Scholar**：如果课程涉及论文，通过 arXiv API 或 Scholar 获取相关论文信息
+
+### 信息来源优先级
+
+| 信息类型 | 一手来源 |
+|---------|---------|
+| 课程安排/阅读材料 | 课程官方 syllabus、lecture notes |
+| 教授研究方向 | 教授个人主页、Google Scholar、DBLP |
+| 技术/概念原理 | 原始论文（arXiv、ACM DL、IEEE）、经典教材 |
+| 学生口碑 | Reddit r/csMajors、知乎、GitHub Issues/Projects |
+| 同类课程对比 | 各校官方课程页面、OCW |
+
+### 信息充分性自检
+
+- 纵轴：能梳理出该课程每周的知识建构逻辑吗？核心概念的历史演进清楚吗？
+- 横轴：同类课程列表完整吗？有没有遗漏该领域的标杆课程？
+- 来源：关键事实有可靠来源支撑吗？有没有只靠单一来源就下判断的？
+
+信息不够就再补搜，不要凑合。
+
+---
+
+## 第二步：纵向分析（知识深度轴）
+
+完整还原该课程的知识建构逻辑与所涉概念的演进历史。
+
+### 内容要求
+
+**课程内部纵轴**：
+- 按 syllabus 的周次或模块顺序，梳理课程的教学脉络
+- 每一周/模块的核心学习目标是什么？
+- 知识点之间的依赖关系： Week N 的内容为什么必须排在 Week N-1 之后？
+- 课程的"隐藏结构"：教授是否在某个节点埋了一个需要前后贯通才能理解的"大概念"？
+
+**概念外部纵轴**：
+- 该课程涉及的核心理论/技术/系统是如何诞生的？最早的关键论文是什么？
+- 经历了哪些重要的版本迭代或范式转变？
+- 当前学术界/工业界对这一概念的共识和争议分别是什么？
+
+### 篇幅
+
+3000-8000 字。知识体系庞大的课程（如 OS、DB、PL）靠近上限，专题研讨课靠近下限。核心原则是把知识的来龙去脉讲清楚，不要为了压缩而跳过重要细节。
+
+---
+
+## 第三步：横向分析（资源广度轴）
+
+以当前时间点为切面，将该课程与同类资源进行系统性对比。
+
+### 竞品/同类课程识别
+
+根据课程主题，主动搜索以下院校的同类课程：
+- MIT（6.xxx 系列）
+- Stanford（CSxxx 系列）
+- CMU（15-xxx 系列）
+- UC Berkeley（CSxxx 系列）
+- 其他：Princeton、Cornell、ETH Zurich 等
+
+### 对比维度
+
+至少覆盖以下方面：
+
+**教学设计对比**：
+- 各课程的 prerequisite 要求差异
+- 讲授顺序差异：为什么 A 校先讲 X 后讲 Y，而 B 校相反？
+- 实践环节差异：project 驱动的课程 vs. 理论推导驱动的课程
+
+**内容侧重对比**：
+- 同一主题在不同课程中的深度差异
+- 教授的个人研究视角如何影响课程内容（如某教授是 PL 方向出身，其 OS 课可能在内核调度上着墨较少，而在 Rust/类型系统上着墨较多）
+
+**资源可及性对比**：
+- 哪些课程有完整的 video lecture？
+- 哪些课程开源了全部 assignment 和测试用例？
+- 哪些课程有活跃的学生社区或 GitHub 实现？
+
+### 篇幅
+
+2000-5000 字。视同类课程数量调整，每个主要对比对象至少展开 500 字以上的独立分析。
+
+---
+
+## 第四步：横纵交汇洞察
+
+这是报告的核心精华段。把纵向知识脉络和横向资源对比结合起来，给出对该课程的**个人化学习建议**。
+
+需要回答的核心问题：
+
+1. **这门课的独特视角是什么**：基于纵轴的历史和横轴的对比，这门课在教学设计或内容选择上有什么与众不同的地方？这个差异是有意的取舍还是局限？
+2. **最优学习路径**：如果我要自学这门课，应该按照课程本身的顺序走，还是有更优的学习路径？哪些前置知识必须提前补齐？哪些内容可以跳过或延后？
+3. **资源互补方案**：这门课缺少什么（如没有视频、project 不够完整）？可以用哪些外部资源来补齐？
+4. **难点预警**：基于 syllabus 和历年学生反馈，哪些 week/assignment 是公认的难点？为什么难？如何提前准备？
+5. **知识串联建议**：学完这门课后，它应该与哪些后续课程或研究方向连接？
+
+### 篇幅
+
+1000-2500 字。
+
+---
+
+## 写作风格
+
+学习报告需要在"学术严谨"和"阅读流畅"之间找到平衡。它不是冷冰冰的 syllabus 摘要，而是一篇能让人从头读到尾、并且真正获得学习策略的文本。
+
+### 借鉴的核心写作元素
+
+**节奏感**：句子时长时短，段落之间跳跃自然。不要每段都一样长。一句话自成一段可以制造重点。好的节奏像波动，每次围绕主线偏出去一点，再用一句"扣主线句"拉回来。
+
+**叙事驱动**：纵向部分要有故事弧线。比如一个概念为什么在某个时间点突然爆发，之前的铺垫是什么，转折点是什么。不要写成"Week 1 讲 A，Week 2 讲 B"的流水账。
+
+**知识自然带出**：背景知识是"聊着聊着顺手掏出来"的，不要"下面我来给大家科普一下"。
+
+**敢下判断**：鼓励给出观点和洞察，但每个观点必须有事实支撑。先摆事实，再给判断。是推测的明确标注。
+
+**层层剥开的修辞**：不直接讲结论，用"现象→表面解释→更深的追问→核心洞察"的方式展开，让读者参与到思考过程中。
+
+**回环呼应**：开头或纵向部分埋的细节，在交汇洞察或结尾 callback 回来。前后因果的闭合感是让报告从"信息流"变成"作品"的关键。
+
+### 需要克制的元素
+
+- **过强的口语化**：报告可以有适度的交流感，但不要过于随意。
+- **去小标题化**：研究报告需要清晰的章节结构和小标题导航。
+- **标点使用**：可以正常使用冒号和破折号，保证信息传达效率。
+
+### 绝对禁区
+
+无论什么文体都要避免以下 AI 味标记：
+- 套话："首先...其次...最后"、"综上所述"、"值得注意的是"、"不难发现"
+- 空洞形容词："赋能"、"抓手"、"打造闭环"
+- 教科书开头："在当今计算机科学快速发展的时代"、"随着技术的不断进步"
+- 高频踩雷词："说白了"、"意味着什么？"、"这意味着"、"本质上"、"换句话说"、"不可否认"
+- 空泛工具/概念名：不说"某个算法"、"某个系统"，要说具体名字
+- 编造场景：如果某个信息搜不到，诚实标注"该信息暂缺"，绝不编造
+
+### 用人话写
+
+避免空洞的概括性陈述，用具体的细节和例子代替。比如不要写"该课程在这一阶段深入讲解了并发控制"，而要写"从 Week 5 开始，课程用整整三周展开并发控制：先从两阶段锁的直觉讲起，再到 B+ 树中的锁耦合，最后落到 ARIES 恢复协议".
+
+---
+
+## 第五步：生成报告
+
+报告写完后，默认输出为 Markdown 格式。如果用户需要 PDF，使用本 Skill 自带的 `scripts/md_to_pdf.py` 脚本转换。
+
+### Markdown 写作注意事项
+
+- 第一行用 `# 标题` 作为报告标题（如 `# Brown CSCI 1650: Software Security 学习报告`）
+- 紧接标题后可用 `> 研究时间：... | 课程院校：... | 教授：...` 格式写元信息
+- 用 `##` 作为主要章节标题（纵向分析、横向分析、横纵交汇等）
+- 用 `###` 和 `####` 作为子章节
+- 表格使用标准 Markdown 表格语法
+- 引用使用 `>` 语法
+- 加粗使用 `**文本**`
+
+### 报告结构模板
+
+```
+封面页（PDF 时自动生成）
+
+目录
+
+一、课程概览
+[一句话定义课程主题，以及它在 CS 版图中的位置]
+
+二、纵向分析：知识建构与概念演进
+[课程内部脉络 + 外部概念历史，3000-8000字]
+
+三、横向分析：同类课程与资源对比
+[与其他顶级课程的对比，2000-5000字]
+
+四、横纵交汇：学习策略与洞察
+[针对该课程的个人化学习建议，1000-2500字]
+
+五、信息来源
+[所有引用的来源列表，标注 URL 和访问时间]
 ```
 
-3. Package for Claude:
-```bash
-skill-seekers package output/<skill-name> --target claude
-```
+### PDF 转换流程
 
-4. Install to Claude:
-```bash
-skill-seekers install-agent output/<skill-name> --agent claude
-```
+1. 先完成 Markdown 稿件，保存为 `[课程名]_学习报告.md`
+2. 安装依赖（如未安装）：`pip install weasyprint markdown --break-system-packages`
+3. 运行转换脚本：
+   ```bash
+   python [skill目录]/scripts/md_to_pdf.py input.md output.pdf --title "课程名" --author "CS Lecture Learn"
+   ```
+4. PDF 文件命名为 `[课程名]_学习报告.pdf`，保存到用户工作目录
 
-## Important Rules
+---
 
-- `--target` belongs to `package`, not `create`.
-- For folders of PDFs, prefer `unified` config with `sources` array.
-- Unified build now cleans per-lecture intermediates by default.
-- If you want to keep intermediates:
-```bash
-skill-seekers unified --config arch-config.json --keep-pdf-intermediates
-```
+## 质检清单
 
-## Troubleshooting
+交付前自检：
 
-See [references/troubleshooting.md](references/troubleshooting.md) for common failures and fixes.
+- [ ] 纵轴梳理了课程每周/每模块的教学逻辑，不是 syllabus 的照搬？
+- [ ] 核心概念的历史演进有足够深度？
+- [ ] 横轴对比了至少 2-3 个同类顶级课程或资源？
+- [ ] 对比维度覆盖了教学设计、内容侧重、资源可及性？
+- [ ] 交汇洞察给出了具体可执行的学习建议，而非前面内容的缩写？
+- [ ] 最优学习路径、难点预警、资源互补方案都覆盖到了？
+- [ ] 写作风格有节奏感、有可读性？不是冷冰冰的 syllabus 摘要？
+- [ ] 没有触犯绝对禁区里的任何一条？
+- [ ] 所有关键事实标注了信息来源？
+- [ ] 搜不到的信息诚实标注了"暂缺"，没有编造？
