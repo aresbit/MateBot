@@ -7,3 +7,4 @@ __pycache__/
 *.pid
 *.url
 .DS_Store
+.self*
