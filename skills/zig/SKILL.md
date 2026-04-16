@@ -135,7 +135,178 @@ pub const foo = other.foo;
 ```
 
 ### `async`/`await` - REMOVED
-Keywords removed from language. Async I/O support is planned for future releases.
+Keywords removed from language. Replaced with the `std.Io` concurrency model in 0.16.0.
+
+## Critical: I/O as an Interface (0.16.0)
+
+All I/O functionality now requires an explicit `Io` instance. Anything that blocks control flow or introduces nondeterminism is owned by the I/O interface.
+
+### "Juicy Main"
+Main functions now receive initialization state via `std.process.Init`:
+
+```zig
+// WRONG - old main signature
+pub fn main() !void {
+    const gpa = std.heap.DebugAllocator(.{}).init;
+    // ...
+}
+
+// CORRECT - new "Juicy Main"
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    // ...
+}
+```
+
+**When upgrading without an `Io` instance:**
+```zig
+var threaded: Io.Threaded = .init_single_threaded;
+const io = threaded.io();
+// Non-ideal workaround; prefer accepting Io as a parameter
+```
+
+### `Io` Implementations
+
+*   **`Io.Threaded`** — stable, well-tested. Direct blocking syscalls on threads.
+    *   `-fno-single-threaded` — supports task-level concurrency and cancelation.
+    *   `-fsingle-threaded` — sequential execution.
+*   **`Io.Evented`** — experimental M:N threading / stackful coroutines.
+    *   Backends: `Io.Uring` (Linux io_uring, incomplete), `Io.Kqueue`, `Io.Dispatch` (GCD/macOS).
+*   **`Io.failing`** — simulates a system with no operations.
+
+### Concurrency: `Future`, `Group`, `Batch`
+
+`io.async` creates an independent task; `io.concurrent` creates one that *must* run concurrently (can fail with `error.ConcurrencyUnavailable`). Both return a `Future(T)` with `.await` and `.cancel`.
+
+```zig
+var task = io.async(downloadFile, .{ io, url });
+defer if (task.cancel(io)) |file| file.close(io) else |_| {}
+const result = try task.await(io);
+```
+
+`Group` manages many tasks with the same lifetime (O(1) spawn overhead):
+
+```zig
+var group: Io.Group = .init;
+defer group.cancel(io);
+for (urls) |url| group.async(io, fetch, .{ io, url });
+try group.await(io);
+```
+
+`Batch` is a lower-level abstraction for concurrent *operations* (currently `FileReadStreaming`, `FileWriteStreaming`, `DeviceIoControl`, `NetReceive`). More efficient than `Future` but less flexible.
+
+### Cancelation
+
+All cancelable I/O operations include `error.Canceled` in their error sets. Requesting cancelation is equivalent to awaiting plus an interrupt request. Handle it by propagating, calling `io.recancel()`, or using `io.swapCancelProtection()`. Add explicit cancelation points in long CPU tasks with `io.checkCancel()`.
+
+### Sync Primitives Migrated to `std.Io`
+
+| Old (0.15.x) | New (0.16.0) |
+|--------------|--------------|
+| `std.Thread.ResetEvent` | `std.Io.Event` |
+| `std.Thread.WaitGroup` | `std.Io.Group` |
+| `std.Thread.Futex` | `std.Io.Futex` |
+| `std.Thread.Mutex` | `std.Io.Mutex` |
+| `std.Thread.Condition` | `std.Io.Condition` |
+| `std.Thread.Semaphore` | `std.Io.Semaphore` |
+| `std.Thread.RwLock` | `std.Io.RwLock` |
+| `std.once` | **REMOVED** — avoid globals or hand-roll |
+
+Lock-free primitives do **not** require `std.Io` integration.
+
+### Entropy / Random
+
+```zig
+// WRONG - old API
+std.crypto.random.bytes(&buffer);
+const rng = std.crypto.random;
+
+// CORRECT
+io.random(&buffer);
+const rng_impl: std.Random.IoSource = .{ .io = io };
+const rng = rng_impl.interface();
+// Use `io.randomSecure(&buffer)` for CSPRNG without in-process state
+```
+
+### Time
+
+```zig
+// WRONG - old API
+const now = std.time.timestamp;
+const instant = std.time.Instant.now();
+
+// CORRECT
+const ts = std.Io.Timestamp.now(io);
+const clock = std.Io.Clock.monotonic;
+const resolution = try clock.resolution(io);
+```
+
+### File System (`std.fs` → `std.Io`)
+
+All filesystem APIs migrated to `std.Io`.
+
+```zig
+// WRONG - old API
+const file = try std.fs.cwd().openFile("foo.txt", .{});
+defer file.close();
+try file.writeAll("hello");
+
+// CORRECT
+const file = try std.Io.Dir.cwd().openFile(io, "foo.txt", .{});
+defer file.close(io);
+try file.writeStreamingAll(io, "hello");
+```
+
+Major renames:
+*   `std.fs.Dir` → `std.Io.Dir`
+*   `std.fs.File` → `std.Io.File`
+*   `fs.Dir.makeDir` → `Io.Dir.createDir`
+*   `fs.File.read` → `Io.File.readStreaming`
+*   `fs.File.write` → `Io.File.writeStreaming`
+*   `fs.File.pread` → `Io.File.readPositional`
+*   `fs.File.pwrite` → `Io.File.writePositional`
+*   `fs.File.getEndPos` → `Io.File.length`
+*   `fs.File.setEndPos` → `Io.File.setLength`
+*   `fs.File.chmod` → `Io.File.setPermissions`
+*   `fs.selfExePath` → `std.process.executablePath`
+*   `fs.openSelfExe` → `std.process.openExecutable`
+
+See full migration list in the 0.16.0 release notes.
+
+### Networking (`std.net` / `std.http` → `std.Io`)
+
+All networking APIs now require `Io`. `Io.Evented` does not yet implement networking.
+
+```zig
+const host_name: Io.net.HostName = try .init(args[1]);
+var http_client: std.http.Client = .{ .allocator = gpa, .io = io };
+var request = try http_client.request(.HEAD, .{ .host = .{ .percent_encoded = host_name.bytes } }, .{});
+try request.sendBodiless();
+```
+
+### Process
+
+```zig
+// WRONG - old API
+var child = std.process.Child.init(argv, gpa);
+try child.spawn(io);
+const result = try std.process.Child.run(allocator, io, .{ ... });
+
+// CORRECT
+var child = try std.process.spawn(io, .{ .argv = argv, .stdin = .pipe, .stdout = .pipe });
+const result = try std.process.run(allocator, io, .{ ... });
+
+// Replace current process image
+const err = std.process.replace(io, .{ .argv = argv });
+```
+
+### `posix` and `os.windows` Removals
+
+Most `std.posix` and `std.os.windows` medium-level functions removed. Choose:
+*   **Higher:** use `std.Io`
+*   **Lower:** use `std.posix.system` directly
 
 ## Critical: I/O API Rewrite ("Writergate")
 
@@ -408,9 +579,16 @@ Structs, unions, enums, and opaques are only resolved when size or field type is
 | `ambiguous format string` | Use `{f}` for format methods |
 | `sanitize_c = true` | Type changed to `?std.zig.SanitizeC` — use `.full`, `.trap`, or `.off` |
 | `std.fifo.LinearFifo` | Removed — use `std.Io.Reader`/`Writer` patterns |
-| `posix.sendfile` | Removed — use `std.fs.File` writer `.sendFileAll()` |
+| `posix.sendfile` | Removed — use `std.Io.File` writer `.sendFileAll()` |
 | `std.fmt.Formatter` | Deprecated — renamed to `std.fmt.Alt` |
 | `fmtSliceEscapeLower`/`Upper` | Use `std.ascii.hexEscape(bytes, .lower/.upper)` |
+| `file.close()` | Pass `Io`: `file.close(io)` |
+| `std.fs.cwd().openFile(...)` | Use `std.Io.Dir.cwd().openFile(io, ...)` |
+| `std.Thread.Mutex` / `WaitGroup` | Use `std.Io.Mutex` / `std.Io.Group` |
+| `std.crypto.random.bytes` | Use `io.random(&buffer)` |
+| `std.time.Instant` | Use `std.Io.Timestamp` |
+| `std.once` | Removed — avoid globals or hand-roll |
+| `std.process.Child.run` | Use `std.process.run(io, allocator, .{...})` |
 
 ## Language References
 
