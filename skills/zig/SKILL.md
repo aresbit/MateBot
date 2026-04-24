@@ -167,6 +167,25 @@ const io = threaded.io();
 // Non-ideal workaround; prefer accepting Io as a parameter
 ```
 
+**⚠️ `io` parameter type: use `anytype`, not `Io.Threaded`**
+
+`init.io` returns the generic `Io` interface type, NOT `Io.Threaded`. Functions that accept an `io` parameter should use `anytype`:
+
+```zig
+// WRONG — "expected type 'Io.Threaded', found 'Io'"
+fn train(io: std.Io.Threaded) !void { ... }
+
+// CORRECT
+fn train(io: anytype) !void { ... }
+
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;  // io is generic Io interface
+    try train(io);       // passes cleanly with anytype
+}
+```
+
+The `Io` variants (`Threaded`, `Evented`, `failing`) are implementations, not interchangeable with the generic interface type.
+
 ### `Io` Implementations
 
 *   **`Io.Threaded`** — stable, well-tested. Direct blocking syscalls on threads.
@@ -318,13 +337,36 @@ The entire `std.io` API changed. New `std.Io.Writer` and `std.Io.Reader` are **n
 const stdout = std.io.getStdOut().writer();
 try stdout.print("Hello\n", .{});
 
-// CORRECT - new API: provide buffer, access .interface, flush
+// CORRECT - new API: provide Io, buffer, access .interface, flush
 var buf: [4096]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&buf);
-const stdout = &stdout_writer.interface;
+var file_writer = std.Io.File.stdout().writer(io, &buf);
+const stdout = &file_writer.interface;
 try stdout.print("Hello\n", .{});
 try stdout.flush();  // REQUIRED!
 ```
+
+**CRITICAL: print() always requires args tuple.** Even format strings without specifiers need `, .{}`:
+```zig
+// WRONG — "expected 2 argument(s), found 1"
+try w.print("hello\n");
+
+// CORRECT
+try w.print("hello\n", .{});
+try w.print("count = {d}\n", .{42});
+```
+
+**File.Writer vs Io.Writer are different types.** Use `.interface` to bridge:
+```zig
+var fw = file.writer(io, &buf);  // returns std.Io.File.Writer
+const w = &fw.interface;          // *std.Io.Writer — the type functions expect
+```
+
+**Format specifiers for f64:** `{d}` formats f64 as decimal float (NOT `{f}` or `{g}`):
+- `{d}` — decimal float (calls `printFloat` internally)
+- `{f}` — calls `value.format(w)` (custom format method — different semantic!)
+- `{g}` — NOT supported for f64 (compile error)
+- `{e}` — scientific notation
+- Precision works with `{d:>4.1}` (width 4, precision 1, right-aligned)
 
 ### Reading
 ```zig
@@ -367,6 +409,29 @@ const line = (try r.takeDelimiter('\n')).?;  // "hello" (returns null at EOF)
 - `CountingWriter` → `std.Io.Writer.Discarding` (has `.fullCount()`)
 - `BufferedWriter` → buffer provided to `.writer(&buf)` call
 - Allocating output → `std.Io.Writer.Allocating`
+
+## build.zig.zon (ZON Format)
+
+ZON (Zig Object Notation) in `build.zig.zon` has specific syntax rules.
+
+### `.name` is an enum literal, not a string
+
+```zig
+// WRONG - "expected enum literal"
+.name = "my_package",
+
+// CORRECT
+.name = .my_package,
+```
+
+### `.fingerprint` is required
+
+```zig
+.fingerprint = 0x7dab62f80910e47b,
+// If new project, use the fingerprint value the compiler suggests
+```
+
+See **[std.zon](references/std-zon.md)** for complete ZON format reference.
 
 ## Critical: Build System (0.15.x)
 
@@ -566,7 +631,7 @@ Structs, unions, enums, and opaques are only resolved when size or field type is
 ## Quick Fixes
 
 | Error | Fix |
-|-------|-----|
+|-------|------|
 | `@Type was removed from the language` | Use `@Int`, `@Enum`, `@Struct`, `@Union`, `@Pointer`, `@Fn`, `@Tuple`, `@EnumLiteral` |
 | `@cImport is deprecated` | Use `b.addTranslateC()` in build.zig |
 | `@intFromFloat is deprecated` | Use `@floor`, `@ceil`, `@round`, or `@trunc` directly to integer |
@@ -589,6 +654,12 @@ Structs, unions, enums, and opaques are only resolved when size or field type is
 | `std.time.Instant` | Use `std.Io.Timestamp` |
 | `std.once` | Removed — avoid globals or hand-roll |
 | `std.process.Child.run` | Use `std.process.run(io, allocator, .{...})` |
+| `build.zig.zon: expected enum literal` | Use `.name = .my_package` (enum literal), not `"my_package"` (string) |
+| `member function expected 2 argument(s), found 1` | Add `, .{}` args tuple: `w.print("text\n", .{})` |
+| `invalid format string 'g' for type 'f64'` | Use `{d}` for f64 decimal — `{g}` and `{f}` are NOT valid f64 specifiers in Writer.print |
+| `expected type 'Io.Threaded', found 'Io'` | Use `anytype` for io param: `fn foo(io: anytype)` not `fn foo(io: std.Io.Threaded)` |
+| `@enumToInt is deprecated` | Use `@intFromEnum(value)` |
+| `expected enum literal, found string` in .zon | ZON uses `.field = .literal`, not `.field = "string"` for enum-like fiels |
 
 ## Language References
 
