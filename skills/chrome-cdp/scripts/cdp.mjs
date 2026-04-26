@@ -7,7 +7,7 @@
 // the CDP session open. Chrome's "Allow debugging" modal fires once per
 // daemon (= once per tab). Daemons auto-exit after 20min idle.
 
-import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { resolve } from 'path';
 import { spawn } from 'child_process';
@@ -19,32 +19,76 @@ const IDLE_TIMEOUT = 20 * 60 * 1000;
 const DAEMON_CONNECT_RETRIES = 20;
 const DAEMON_CONNECT_DELAY = 300;
 const MIN_TARGET_PREFIX_LEN = 8;
-const SOCK_PREFIX = '/tmp/cdp-';
-const PAGES_CACHE = '/tmp/cdp-pages.json';
+const IS_WINDOWS = process.platform === 'win32';
+if (!IS_WINDOWS) process.umask(0o077);
+const RUNTIME_DIR = IS_WINDOWS
+  ? resolve(process.env.LOCALAPPDATA || resolve(homedir(), 'AppData', 'Local'), 'cdp')
+  : process.env.XDG_RUNTIME_DIR
+    ? resolve(process.env.XDG_RUNTIME_DIR, 'cdp')
+    : resolve(homedir(), '.cache', 'cdp');
+try { mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 }); } catch {}
+const PAGES_CACHE = resolve(RUNTIME_DIR, 'pages.json');
 
-function sockPath(targetId) { return `${SOCK_PREFIX}${targetId}.sock`; }
+function sockPath(targetId) {
+  return IS_WINDOWS
+    ? `\\\\.\\pipe\\cdp-${targetId}`
+    : resolve(RUNTIME_DIR, `cdp-${targetId}.sock`);
+}
 
 function getWsUrl() {
-  const candidates = [
-    resolve(homedir(), 'Library/Application Support/Google/Chrome/DevToolsActivePort'),
-    resolve(homedir(), '.config/google-chrome/DevToolsActivePort'),
+  const home = homedir();
+  // macOS: ~/Library/Application Support/<name>/DevToolsActivePort
+  const macBrowsers = [
+    'Google/Chrome', 'Google/Chrome Beta', 'Google/Chrome for Testing',
+    'Chromium', 'BraveSoftware/Brave-Browser', 'Microsoft Edge',
   ];
-  const portFile = candidates.find(path => existsSync(path));
-  if (!portFile) throw new Error(`Could not find DevToolsActivePort file in: ${candidates.join(', ')}`);
+  // Linux: ~/.config/<name>/DevToolsActivePort
+  const linuxBrowsers = [
+    'google-chrome', 'google-chrome-beta', 'chromium',
+    'vivaldi', 'vivaldi-snapshot',
+    'BraveSoftware/Brave-Browser', 'microsoft-edge',
+  ];
+  // Linux Flatpak: ~/.var/app/<app-id>/config/<name>/DevToolsActivePort
+  const flatpakBrowsers = [
+    ['org.chromium.Chromium', 'chromium'],
+    ['com.google.Chrome', 'google-chrome'],
+    ['com.brave.Browser', 'BraveSoftware/Brave-Browser'],
+    ['com.microsoft.Edge', 'microsoft-edge'],
+    ['com.vivaldi.Vivaldi', 'vivaldi'],
+  ];
+  const candidates = [
+    process.env.CDP_PORT_FILE,
+    ...macBrowsers.flatMap(b => [
+      resolve(home, 'Library/Application Support', b, 'DevToolsActivePort'),
+      resolve(home, 'Library/Application Support', b, 'Default/DevToolsActivePort'),
+    ]),
+    ...linuxBrowsers.flatMap(b => [
+      resolve(home, '.config', b, 'DevToolsActivePort'),
+      resolve(home, '.config', b, 'Default/DevToolsActivePort'),
+    ]),
+    ...flatpakBrowsers.flatMap(([appId, name]) => [
+      resolve(home, '.var/app', appId, 'config', name, 'DevToolsActivePort'),
+      resolve(home, '.var/app', appId, 'config', name, 'Default/DevToolsActivePort'),
+    ]),
+    // Windows: %LOCALAPPDATA%/<name>/User Data/DevToolsActivePort
+    ...(IS_WINDOWS ? ['Google/Chrome', 'BraveSoftware/Brave-Browser', 'Microsoft/Edge'].flatMap(b => {
+      const base = process.env.LOCALAPPDATA || resolve(home, 'AppData/Local');
+      return [
+        resolve(base, b, 'User Data/DevToolsActivePort'),
+        resolve(base, b, 'User Data/Default/DevToolsActivePort'),
+      ];
+    }) : []),
+  ].filter(Boolean);
+  const portFile = candidates.find(p => existsSync(p));
+  if (!portFile) throw new Error('No DevToolsActivePort found. Enable remote debugging at chrome://inspect/#remote-debugging');
   const lines = readFileSync(portFile, 'utf8').trim().split('\n');
-  return `ws://127.0.0.1:${lines[0]}${lines[1]}`;
+  if (lines.length < 2 || !lines[0] || !lines[1]) throw new Error(`Invalid DevToolsActivePort file: ${portFile}`);
+  const host = process.env.CDP_HOST || '127.0.0.1';
+  return `ws://${host}:${lines[0]}${lines[1]}`;
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function listDaemonSockets() {
-  return readdirSync('/tmp')
-    .filter(f => f.startsWith('cdp-') && f.endsWith('.sock'))
-    .map(f => ({
-      targetId: f.slice(4, -5),
-      socketPath: `/tmp/${f}`,
-    }));
-}
 
 function resolvePrefix(prefix, candidates, noun = 'target', missingHint = '') {
   const upper = prefix.toUpperCase();
@@ -254,7 +298,7 @@ async function evalStr(cdp, sid, expression) {
   return typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val ?? '');
 }
 
-async function shotStr(cdp, sid, filePath) {
+async function shotStr(cdp, sid, filePath, targetId) {
   // Get device scale factor so we can report coordinate mapping
   let dpr = 1;
   try {
@@ -278,7 +322,7 @@ async function shotStr(cdp, sid, filePath) {
   }
 
   const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' }, sid);
-  const out = filePath || '/tmp/screenshot.png';
+  const out = filePath || resolve(RUNTIME_DIR, `screenshot-${(targetId || 'unknown').slice(0, 8)}.png`);
   writeFileSync(out, Buffer.from(data, 'base64'));
 
   const lines = [out];
@@ -324,6 +368,14 @@ async function waitForDocumentReady(cdp, sid, timeoutMs = NAVIGATION_TIMEOUT) {
 }
 
 async function navStr(cdp, sid, url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+      throw new Error(`Only http/https URLs allowed, got: ${url}`);
+  } catch (e) {
+    if (e.message.startsWith('Only')) throw e;
+    throw new Error(`Invalid URL: ${url}`);
+  }
   await cdp.send('Page.enable', {}, sid);
   const loadEvent = cdp.waitForEvent('Page.loadEventFired', NAVIGATION_TIMEOUT);
   const result = await cdp.send('Page.navigate', { url }, sid);
@@ -458,7 +510,7 @@ async function runDaemon(targetId) {
     if (!alive) return;
     alive = false;
     server.close();
-    try { unlinkSync(sp); } catch {}
+    if (!IS_WINDOWS) try { unlinkSync(sp); } catch {}
     cdp.close();
     process.exit(0);
   }
@@ -499,7 +551,7 @@ async function runDaemon(targetId) {
         }
         case 'snap': case 'snapshot': result = await snapshotStr(cdp, sessionId, true); break;
         case 'eval': result = await evalStr(cdp, sessionId, args[0]); break;
-        case 'shot': case 'screenshot': result = await shotStr(cdp, sessionId, args[0]); break;
+        case 'shot': case 'screenshot': result = await shotStr(cdp, sessionId, args[0], targetId); break;
         case 'html': result = await htmlStr(cdp, sessionId, args[0]); break;
         case 'nav': case 'navigate': result = await navStr(cdp, sessionId, args[0]); break;
         case 'net': case 'network': result = await netStr(cdp, sessionId); break;
@@ -546,7 +598,12 @@ async function runDaemon(targetId) {
     });
   });
 
-  try { unlinkSync(sp); } catch {}
+  server.on('error', (e) => {
+    process.stderr.write(`Daemon server listen failed: ${e.message}\n`);
+    process.exit(1);
+  });
+
+  if (!IS_WINDOWS) try { unlinkSync(sp); } catch {}
   server.listen(sp);
 }
 
@@ -568,7 +625,7 @@ async function getOrStartTabDaemon(targetId) {
   try { return await connectToSocket(sp); } catch {}
 
   // Clean stale socket
-  try { unlinkSync(sp); } catch {}
+  if (!IS_WINDOWS) try { unlinkSync(sp); } catch {}
 
   // Spawn daemon
   const child = spawn(process.execPath, [process.argv[1], '_daemon', targetId], {
@@ -637,36 +694,24 @@ function sendCommand(conn, req) {
   });
 }
 
-// Find any running daemon socket to reuse for list
-function findAnyDaemonSocket() {
-  return listDaemonSockets()[0]?.socketPath || null;
-}
-
 // ---------------------------------------------------------------------------
 // Stop daemons
 // ---------------------------------------------------------------------------
 
 async function stopDaemons(targetPrefix) {
-  const daemons = listDaemonSockets();
+  if (!existsSync(PAGES_CACHE)) return;
+  const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
+  const targets = targetPrefix
+    ? [resolvePrefix(targetPrefix, pages.map(p => p.targetId), 'target')]
+    : pages.map(p => p.targetId);
 
-  if (targetPrefix) {
-    const targetId = resolvePrefix(targetPrefix, daemons.map(d => d.targetId), 'daemon');
-    const daemon = daemons.find(d => d.targetId === targetId);
+  for (const targetId of targets) {
+    const sp = sockPath(targetId);
     try {
-      const conn = await connectToSocket(daemon.socketPath);
+      const conn = await connectToSocket(sp);
       await sendCommand(conn, { cmd: 'stop' });
     } catch {
-      try { unlinkSync(daemon.socketPath); } catch {}
-    }
-    return;
-  }
-
-  for (const daemon of daemons) {
-    try {
-      const conn = await connectToSocket(daemon.socketPath);
-      await sendCommand(conn, { cmd: 'stop' });
-    } catch {
-      try { unlinkSync(daemon.socketPath); } catch {}
+      if (!IS_WINDOWS) try { unlinkSync(sp); } catch {}
     }
   }
 }
@@ -682,7 +727,7 @@ Usage: cdp <command> [args]
   list                              List open pages (shows unique target prefixes)
   snap  <target>                    Accessibility tree snapshot
   eval  <target> <expr>             Evaluate JS expression
-  shot  <target> [file]             Screenshot (default: /tmp/screenshot.png); prints coordinate mapping
+  shot  <target> [file]             Screenshot (default: screenshot-<target>.png in runtime dir); prints coordinate mapping
   html  <target> [selector]         Get HTML (full page or CSS selector)
   nav   <target> <url>              Navigate to URL and wait for load completion
   net   <target>                    Network performance entries
@@ -694,6 +739,8 @@ Usage: cdp <command> [args]
                                     Optional interval in ms between clicks (default 1500)
   evalraw <target> <method> [json]  Send a raw CDP command; returns JSON result
                                     e.g. evalraw <t> "DOM.getDocument" '{}'
+  open  [url]                       Open a new tab (default: about:blank)
+                                    Note: each new tab triggers a fresh "Allow debugging?" prompt
   stop  [target]                    Stop daemon(s)
 
 <target> is a unique targetId prefix from "cdp list". If a prefix is ambiguous,
@@ -717,7 +764,7 @@ EVAL SAFETY NOTE
   collect all data in a single eval.
 
 DAEMON IPC (for advanced use / scripting)
-  Each tab runs a persistent daemon at Unix socket: /tmp/cdp-<fullTargetId>.sock
+  Each tab runs a persistent daemon at Unix socket in the runtime dir (see below).
   Protocol: newline-delimited JSON (one JSON object per line, UTF-8).
     Request:  {"id":<number>, "cmd":"<command>", "args":["arg1","arg2",...]}
     Response: {"id":<number>, "ok":true,  "result":"<string>"}
@@ -742,27 +789,32 @@ async function main() {
     console.log(USAGE); process.exit(0);
   }
 
-  // List — use existing daemon if available, otherwise direct
   if (cmd === 'list' || cmd === 'ls') {
-    let pages;
-    const existingSock = findAnyDaemonSocket();
-    if (existingSock) {
-      try {
-        const conn = await connectToSocket(existingSock);
-        const resp = await sendCommand(conn, { cmd: 'list_raw' });
-        if (resp.ok) pages = JSON.parse(resp.result);
-      } catch {}
-    }
-    if (!pages) {
-      // No daemon running — connect directly (will trigger one Allow)
-      const cdp = new CDP();
-      await cdp.connect(getWsUrl());
-      pages = await getPages(cdp);
-      cdp.close();
-    }
-    writeFileSync(PAGES_CACHE, JSON.stringify(pages));
+    const cdp = new CDP();
+    await cdp.connect(getWsUrl());
+    const pages = await getPages(cdp);
+    cdp.close();
+    writeFileSync(PAGES_CACHE, JSON.stringify(pages), { mode: 0o600 });
     console.log(formatPageList(pages));
     setTimeout(() => process.exit(0), 100);
+    return;
+  }
+
+  // Open new tab
+  if (cmd === 'open') {
+    const url = args[0] || 'about:blank';
+    const cdp = new CDP();
+    await cdp.connect(getWsUrl());
+    const { targetId } = await cdp.send('Target.createTarget', { url });
+    // Refresh cache; new tab may not appear in getTargets immediately, so add it manually
+    const pages = await getPages(cdp);
+    if (!pages.some(p => p.targetId === targetId)) {
+      pages.push({ targetId, title: url, url });
+    }
+    cdp.close();
+    writeFileSync(PAGES_CACHE, JSON.stringify(pages), { mode: 0o600 });
+    console.log(`Opened new tab: ${targetId.slice(0, 8)}  ${url}`);
+    console.log('Note: this tab will need "Allow debugging?" approval on first access.');
     return;
   }
 
@@ -785,21 +837,13 @@ async function main() {
     process.exit(1);
   }
 
-  // Resolve prefix → full targetId from cache or running daemon
-  let targetId;
-  const daemonTargetIds = listDaemonSockets().map(d => d.targetId);
-  const daemonMatches = daemonTargetIds.filter(id => id.toUpperCase().startsWith(targetPrefix.toUpperCase()));
-
-  if (daemonMatches.length > 0) {
-    targetId = resolvePrefix(targetPrefix, daemonTargetIds, 'daemon');
-  } else {
-    if (!existsSync(PAGES_CACHE)) {
-      console.error('No page list cached. Run "cdp list" first.');
-      process.exit(1);
-    }
-    const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
-    targetId = resolvePrefix(targetPrefix, pages.map(p => p.targetId), 'target', 'Run "cdp list".');
+  // Resolve prefix → full targetId from pages cache
+  if (!existsSync(PAGES_CACHE)) {
+    console.error('No page list cached. Run "cdp list" first.');
+    process.exit(1);
   }
+  const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
+  const targetId = resolvePrefix(targetPrefix, pages.map(p => p.targetId), 'target', 'Run "cdp list".');
 
   const conn = await getOrStartTabDaemon(targetId);
 

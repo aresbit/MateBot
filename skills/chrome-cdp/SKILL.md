@@ -9,8 +9,9 @@ Lightweight Chrome DevTools Protocol CLI. Connects directly via WebSocket — no
 
 ## Prerequisites
 
-- Chrome with remote debugging enabled: open `chrome://inspect/#remote-debugging` and toggle the switch
+- Chrome (or Chromium, Brave, Edge, Vivaldi) with remote debugging enabled: open `chrome://inspect/#remote-debugging` and toggle the switch
 - Node.js 22+ (uses built-in WebSocket)
+- If your browser's `DevToolsActivePort` is in a non-standard location, set `CDP_PORT_FILE` to its full path
 
 ## Commands
 
@@ -25,7 +26,7 @@ scripts/cdp.mjs list
 ### Take a screenshot
 
 ```bash
-scripts/cdp.mjs shot <target> [file]    # default: /tmp/screenshot.png
+scripts/cdp.mjs shot <target> [file]    # default: screenshot-<target>.png in runtime dir
 ```
 
 Captures the **viewport only**. Scroll first with `eval` if you need content below the fold. Output includes the page's DPR and coordinate conversion hint (see **Coordinates** below).
@@ -55,6 +56,7 @@ scripts/cdp.mjs clickxy <target> <x> <y>       # click at CSS pixel coords
 scripts/cdp.mjs type    <target> <text>         # Input.insertText at current focus; works in cross-origin iframes unlike eval
 scripts/cdp.mjs loadall <target> <selector> [ms]  # click "load more" until gone (default 1500ms between clicks)
 scripts/cdp.mjs evalraw <target> <method> [json]  # raw CDP command passthrough
+scripts/cdp.mjs open    [url]                  # open new tab (each triggers Allow prompt)
 scripts/cdp.mjs stop    [target]               # stop daemon(s)
 ```
 
