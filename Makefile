@@ -50,6 +50,23 @@ SCRIPT_SRCS := matecode.sh bridge_manager.sh start_bridge.sh stop_bridge.sh tmux
 PY_MODULES  := bridge.py attention_manager.py external_memory.py memory.py failure_memory.py kv_cache.py
 
 # -----------------------------------------------------------------------------
+# Platform Detection
+# -----------------------------------------------------------------------------
+# Windows-native make (e.g. ezwinports) uses cmd.exe as shell by default,
+# but all recipes in this Makefile use bash syntax.  On Windows we set SHELL
+# to bash from Git Bash and provide a HOME fallback for cmd.exe environments.
+
+ifeq ($(OS),Windows_NT)
+    IS_WINDOWS := 1
+    SHELL := bash
+    ifeq ($(HOME),)
+        HOME := $(subst \,/,$(USERPROFILE))
+    endif
+else
+    IS_WINDOWS := 0
+endif
+
+# -----------------------------------------------------------------------------
 # Colors for Output
 # -----------------------------------------------------------------------------
 
@@ -76,19 +93,19 @@ endif
 # -----------------------------------------------------------------------------
 
 define print_info
-	@printf "$(CYAN)==>$(RESET) %s\n" "$(1)"
+	@echo -e "$(CYAN)==>$(RESET) $(1)"
 endef
 
 define print_success
-	@printf "$(GREEN)✓$(RESET) %s\n" "$(1)"
+	@echo -e "$(GREEN)✓$(RESET) $(1)"
 endef
 
 define print_warn
-	@printf "$(YELLOW)!$(RESET) %s\n" "$(1)"
+	@echo -e "$(YELLOW)!$(RESET) $(1)"
 endef
 
 define print_error
-	@printf "$(RED)✗$(RESET) %s\n" "$(1)"
+	@echo -e "$(RED)✗$(RESET) $(1)"
 endef
 
 # -----------------------------------------------------------------------------
@@ -104,7 +121,7 @@ all: help
 # -----------------------------------------------------------------------------
 
 help:
-	@printf "$(CYAN)%s$(RESET) v%s - %s\n\n" "$(NAME)" "$(VERSION)" "$(DESCRIPTION)"
+	@echo -e "$(CYAN)$(NAME)$(RESET) v$(VERSION) - $(DESCRIPTION)\n"
 	@echo "Targets:"
 	@echo "  $(GREEN)install$(RESET)      Install $(NAME) to system directories"
 	@echo "  $(GREEN)uninstall$(RESET)    Remove $(NAME) from system directories"
@@ -154,14 +171,14 @@ install: check $(BINDIR) $(LIBDIR) $(SHAREDIR) $(DOCDIR) $(CLAUDE_HOOKDIR)
 	@for script in $(SCRIPT_SRCS); do \
 		base=$$(basename "$$script" .sh); \
 		install -m 755 "$$script" "$(BINDIR)/$$base" && \
-		printf "$(GREEN)✓$(RESET) Installed %s\n" "$$base"; \
+		echo -e "$(GREEN)✓$(RESET) Installed $$base"; \
 	done
 
 	@$(call print_info,"Installing Python modules to $(LIBDIR)...")
 	@for file in $(PY_MODULES); do \
 		if [ -f "$$file" ]; then \
 			install -m 644 "$$file" "$(LIBDIR)/" && \
-			printf "$(GREEN)✓$(RESET) Installed %s\n" "$$file"; \
+			echo -e "$(GREEN)✓$(RESET) Installed $$file"; \
 		fi \
 	done
 
@@ -170,7 +187,7 @@ install: check $(BINDIR) $(LIBDIR) $(SHAREDIR) $(DOCDIR) $(CLAUDE_HOOKDIR)
 	@for hook in hooks/*.sh; do \
 		if [ -f "$$hook" ]; then \
 			install -m 755 "$$hook" "$(LIBDIR)/hooks/" && \
-			printf "$(GREEN)✓$(RESET) Installed %s\n" "$$(basename $$hook)"; \
+			echo -e "$(GREEN)✓$(RESET) Installed $$(basename $$hook)"; \
 		fi \
 	done
 
@@ -180,7 +197,7 @@ install: check $(BINDIR) $(LIBDIR) $(SHAREDIR) $(DOCDIR) $(CLAUDE_HOOKDIR)
 		if [ -f "$$hook" ]; then \
 			base=$$(basename "$$hook" .sh); \
 			install -m 755 "$$hook" "$(CLAUDE_HOOKDIR)/$$base" && \
-			printf "$(GREEN)✓$(RESET) Installed %s\n" "$$base"; \
+			echo -e "$(GREEN)✓$(RESET) Installed $$base"; \
 		fi \
 	done
 
@@ -194,7 +211,7 @@ install: check $(BINDIR) $(LIBDIR) $(SHAREDIR) $(DOCDIR) $(CLAUDE_HOOKDIR)
 	@for doc in README.md CHANGELOG.md GUIDE.md TMUX_SETUP.md; do \
 		if [ -f "$$doc" ]; then \
 			install -m 644 "$$doc" "$(DOCDIR)/" && \
-			printf "$(GREEN)✓$(RESET) Installed %s\n" "$$doc"; \
+			echo -e "$(GREEN)✓$(RESET) Installed $$doc"; \
 		fi \
 	done
 
@@ -246,26 +263,26 @@ uninstall:
 	@for script in matecode bridge_manager start_bridge stop_bridge tmux-setup matebot; do \
 		if [ -f "$(BINDIR)/$$script" ]; then \
 			rm -f "$(BINDIR)/$$script" && \
-			printf "$(GREEN)✓$(RESET) Removed %s\n" "$$script"; \
+			echo -e "$(GREEN)✓$(RESET) Removed $$script"; \
 		fi \
 	done
 
 	@$(call print_info,"Removing library files...")
 	@if [ -d "$(LIBDIR)" ]; then \
 		rm -rf "$(LIBDIR)" && \
-		printf "$(GREEN)✓$(RESET) Removed %s\n" "$(LIBDIR)"; \
+		echo -e "$(GREEN)✓$(RESET) Removed $(LIBDIR)"; \
 	fi
 
 	@$(call print_info,"Removing share files...")
 	@if [ -d "$(SHAREDIR)" ]; then \
 		rm -rf "$(SHAREDIR)" && \
-		printf "$(GREEN)✓$(RESET) Removed %s\n" "$(SHAREDIR)"; \
+		echo -e "$(GREEN)✓$(RESET) Removed $(SHAREDIR)"; \
 	fi
 
 	@$(call print_info,"Removing documentation...")
 	@if [ -d "$(DOCDIR)" ]; then \
 		rm -rf "$(DOCDIR)" && \
-		printf "$(GREEN)✓$(RESET) Removed %s\n" "$(DOCDIR)"; \
+		echo -e "$(GREEN)✓$(RESET) Removed $(DOCDIR)"; \
 	fi
 
 	@$(call print_info,"Removing Claude Code hooks...")
@@ -274,7 +291,7 @@ uninstall:
 			base=$$(basename "$$hook" .sh); \
 			if [ -f "$(CLAUDE_HOOKDIR)/$$base" ]; then \
 				rm -f "$(CLAUDE_HOOKDIR)/$$base" && \
-				printf "$(GREEN)✓$(RESET) Removed %s\n" "$$base"; \
+				echo -e "$(GREEN)✓$(RESET) Removed $$base"; \
 			fi; \
 		fi \
 	done
@@ -301,13 +318,13 @@ test: check
 	@echo "Testing script syntax..."
 	@for script in $(SCRIPT_SRCS); do \
 		bash -n "$$script" && \
-		printf "$(GREEN)✓$(RESET) %s: syntax OK\n" "$$script"; \
+		echo -e "$(GREEN)✓$(RESET) $$script: syntax OK"; \
 	done
 	@echo "Testing Python syntax..."
 	@for py in $(PY_MODULES); do \
 		if [ -f "$$py" ]; then \
 			python3 -m py_compile "$$py" && \
-			printf "$(GREEN)✓$(RESET) %s: syntax OK\n" "$$py"; \
+			echo -e "$(GREEN)✓$(RESET) $$py: syntax OK"; \
 		fi \
 	done
 	@$(call print_success,"All tests passed")
@@ -352,17 +369,17 @@ skill:
 		dest="$(CLAUDE_SKILLDIR)/$$name"; \
 		tombstone="$(CLAUDE_DISABLED_SKILLDIR)/$$name"; \
 		if [ -e "$$tombstone" ]; then \
-			printf "$(YELLOW)!$(RESET) Skipped %s (found tombstone in .disabled)\n" "$$name"; \
+			echo -e "$(YELLOW)!$(RESET) Skipped $$name (found tombstone in .disabled)" && \
 			skipped_tombstone=$$((skipped_tombstone + 1)); \
 			continue; \
 		fi; \
 		if [ -e "$$dest" ]; then \
-			printf "$(YELLOW)!$(RESET) Skipped %s (already exists)\n" "$$name"; \
+			echo -e "$(YELLOW)!$(RESET) Skipped $$name (already exists)" && \
 			skipped_exists=$$((skipped_exists + 1)); \
 			continue; \
 		fi; \
 		cp -R "$$src" "$$dest" && \
-		printf "$(GREEN)✓$(RESET) Installed %s\n" "$$name" && \
+		echo -e "$(GREEN)✓$(RESET) Installed $$name" && \
 		installed=$$((installed + 1)); \
 	done; \
-	printf "\nInstalled: %s, Skipped(existing): %s, Skipped(.disabled): %s\n" "$$installed" "$$skipped_exists" "$$skipped_tombstone"
+	echo -e "\nInstalled: $$installed, Skipped(existing): $$skipped_exists, Skipped(.disabled): $$skipped_tombstone"
