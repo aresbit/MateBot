@@ -997,6 +997,15 @@ class OpenccSessionRegistry:
             if sess is None or not sess.is_running:
                 # Force a full create.
                 pass
+            # Tear down the previous renderer's worker thread before
+            # replacing it, so we don't leak threads on turns where the
+            # prior `result` event never arrived (e.g. user interrupted).
+            prev = self._renderers.get(key)
+            if prev is not None:
+                try:
+                    prev.close()
+                except Exception:
+                    pass
             rend = TelegramStreamRenderer(chat_id, telegram_api=TelegramAPI.call)
             self._renderers[key] = rend
             if sess is None or not sess.is_running:
@@ -1028,7 +1037,12 @@ class OpenccSessionRegistry:
         key = str(chat_id)
         with self._lock:
             sess = self._sessions.pop(key, None)
-            self._renderers.pop(key, None)
+            rend = self._renderers.pop(key, None)
+        if rend:
+            try:
+                rend.close()
+            except Exception:
+                pass
         if sess:
             sess.close()
 

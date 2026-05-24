@@ -233,15 +233,28 @@ class OpenccSession:
 
 class TelegramStreamRenderer:
     """Accumulates stream-json events into a per-turn TG message that is
-    edit-updated in place. Avoids hammering Telegram's edit API by throttling
-    updates and chunking when content exceeds the 4096 char limit.
+    edit-updated in place.
 
-    A "turn" begins on the first content of a new user message and ends on
-    the `result` event. Multiple chunks may be sent as separate messages when
-    content overflows; only the *last* chunk is the live editable draft.
+    Concurrency model: stream-json events arrive on the OpenccSession stdout
+    reader thread. Those handlers must NOT call Telegram synchronously —
+    `api.telegram.org` is routed through the user's HTTP proxy and a
+    round-trip is typically 2–5s in China. Blocking the reader thread
+    back-pressures claude-js's stdout, which stalls generation and was the
+    cause of the "messages arriving super slow" symptom after the spawn-mode
+    switch.
+
+    Design: a single per-renderer worker thread owns ALL Telegram I/O.
+    Event handlers only mutate buffered state under a lock and set a
+    `_dirty` event. The worker:
+      - waits for `_dirty` (or a short timeout)
+      - enforces a min interval between TG round-trips (`EDIT_THROTTLE_S`)
+      - snapshots the current body and edits / sends in place
+      - coalesces: many appends + one network call
     """
 
-    EDIT_THROTTLE_S = 0.4   # at most one edit every 400ms
+    # Min seconds between consecutive editMessageText calls. The proxy adds
+    # 2–5s per round-trip; smaller values just queue useless work.
+    EDIT_THROTTLE_S = 1.5
     MAX_TG_LEN = 4000
 
     def __init__(
@@ -255,14 +268,14 @@ class TelegramStreamRenderer:
         self._text = ""           # current live-chunk content
         self._prior_text = ""     # content already shipped in earlier chunks
         self._live_msg_id: Optional[int] = None
-        self._last_edit_ts = 0.0
-        self._pending_flush = False
-        self._timer: Optional[threading.Timer] = None
-        self._tool_lines: list[str] = []  # extra tool_use blurbs to flush together
+        self._tool_lines: list[str] = []
         self._closed = False
-        # RLock so _append_text → _schedule_flush → _flush can re-acquire from
-        # the same thread without deadlocking.
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
+
+        # Worker thread that owns ALL network I/O.
+        self._dirty = threading.Event()
+        self._worker = threading.Thread(target=self._render_worker, daemon=True)
+        self._worker.start()
 
     # -- event entry points ----------------------------------------------
 
@@ -273,125 +286,126 @@ class TelegramStreamRenderer:
         elif et == "assistant":
             self._handle_assistant_message(event)
         elif et == "user":
-            # Echoed tool_result inputs; emit a compact note so users see
-            # tool execution happened.
             self._handle_tool_result(event)
         elif et == "result":
             self._handle_result(event)
-        elif et == "system":
-            # init / status frames; nothing user-visible by default.
-            pass
-
-    # -- partial streaming -----------------------------------------------
+        # "system" init / status frames: nothing user-visible.
 
     def _handle_stream_event(self, event: dict) -> None:
-        """Token-level streaming deltas from --include-partial-messages."""
         ev = event.get("event") or {}
-        ev_type = ev.get("type")
-        if ev_type == "content_block_delta":
+        if ev.get("type") == "content_block_delta":
             delta = ev.get("delta") or {}
             if delta.get("type") == "text_delta":
                 self._append_text(delta.get("text", ""))
-            elif delta.get("type") == "thinking_delta":
-                pass  # internal reasoning, skip
-        # Other event types (message_start, content_block_start, ...) ignored.
+            # thinking_delta: internal reasoning, skip.
 
     def _handle_assistant_message(self, event: dict) -> None:
-        """Full assistant message frame. With partial streaming, the text
-        has already been emitted token-by-token, so we only synthesize
-        tool_use notices here.
-        """
         message = event.get("message") or {}
-        for block in message.get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            bt = block.get("type")
-            if bt == "tool_use":
-                name = block.get("name", "?")
-                self._tool_lines.append(f"🔧 {name}")
-                self._schedule_flush(force=False)
-            # text already handled by stream_event deltas
+        added = False
+        with self._lock:
+            for block in message.get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    self._tool_lines.append(f"🔧 {block.get('name', '?')}")
+                    added = True
+        if added:
+            self._dirty.set()
 
     def _handle_tool_result(self, event: dict) -> None:
         message = event.get("message") or {}
         content = message.get("content")
         if not isinstance(content, list):
             return
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                is_err = bool(block.get("is_error"))
-                tag = "❌" if is_err else "✓"
-                self._tool_lines.append(f"  {tag}")
-                self._schedule_flush(force=False)
+        added = False
+        with self._lock:
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    tag = "❌" if block.get("is_error") else "✓"
+                    self._tool_lines.append(f"  {tag}")
+                    added = True
+        if added:
+            self._dirty.set()
 
     def _handle_result(self, event: dict) -> None:
         is_error = bool(event.get("is_error"))
-        # If there's been no streamed text, fall back to the result field.
-        if not (self._text.strip() or self._prior_text.strip()) and event.get("result"):
-            self._append_text(str(event.get("result")))
-        if is_error and event.get("result"):
-            self._append_text(f"\n\n⚠️ {event.get('result')[:300]}")
-        self._closed = True
-        self._schedule_flush(force=True)
-
-    # -- buffered TG edit logic ------------------------------------------
+        with self._lock:
+            if not (self._text.strip() or self._prior_text.strip()) and event.get("result"):
+                self._text += str(event.get("result"))
+            if is_error and event.get("result"):
+                self._text += f"\n\n⚠️ {str(event.get('result'))[:300]}"
+            self._closed = True
+        self._dirty.set()
 
     def _append_text(self, fragment: str) -> None:
         if not fragment:
             return
         with self._lock:
             self._text += fragment
-            self._schedule_flush(force=False)
+        self._dirty.set()
 
-    def _schedule_flush(self, force: bool) -> None:
-        now = time.time()
-        elapsed = now - self._last_edit_ts
-        if force or elapsed >= self.EDIT_THROTTLE_S:
-            self._flush()
-        elif not self._pending_flush:
-            delay = max(0.0, self.EDIT_THROTTLE_S - elapsed)
-            self._pending_flush = True
-            self._timer = threading.Timer(delay, self._timed_flush)
-            self._timer.daemon = True
-            self._timer.start()
-
-    def _timed_flush(self) -> None:
-        self._pending_flush = False
-        self._flush()
-
-    def _flush(self) -> None:
+    def close(self) -> None:
+        """Signal the worker to exit. Idempotent; safe to call when an
+        already-finished renderer is being replaced for a new turn."""
         with self._lock:
-            self._last_edit_ts = time.time()
-            # Merge tool lines as a header above text content.
-            tool_prefix = ""
-            if self._tool_lines:
-                # Compact repeated tool names: "🔧 Bash 🔧 Bash" → "🔧 Bash ×2"
-                tool_prefix = " ".join(self._tool_lines) + "\n\n"
-            body = (tool_prefix + self._text).rstrip()
+            self._closed = True
+        self._dirty.set()
+
+    # -- worker loop -----------------------------------------------------
+
+    def _render_worker(self) -> None:
+        last_sent_ts = 0.0
+        last_sent_body = ""
+        while True:
+            # Wake on new content or periodically (so close detection isn't
+            # delayed if `_closed` is set while `_dirty` is already cleared).
+            self._dirty.wait(timeout=1.0)
+            self._dirty.clear()
+
+            gap = time.time() - last_sent_ts
+            if gap < self.EDIT_THROTTLE_S:
+                time.sleep(self.EDIT_THROTTLE_S - gap)
+
+            with self._lock:
+                tool_prefix = (" ".join(self._tool_lines) + "\n\n") if self._tool_lines else ""
+                text_snapshot = self._text
+                tool_lines_snap_count = len(self._tool_lines)
+                closed = self._closed
+
+            body = (tool_prefix + text_snapshot).rstrip()
+
             if not body:
+                if closed:
+                    return
+                continue
+
+            try:
+                if len(body) <= self.MAX_TG_LEN:
+                    if body != last_sent_body:
+                        self._upsert_live(body)
+                        last_sent_body = body
+                        last_sent_ts = time.time()
+                else:
+                    head = body[: self.MAX_TG_LEN]
+                    self._upsert_live(head)
+                    last_sent_ts = time.time()
+                    with self._lock:
+                        shipped_text_chars = max(0, self.MAX_TG_LEN - len(tool_prefix))
+                        self._text = self._text[shipped_text_chars:]
+                        del self._tool_lines[:tool_lines_snap_count]
+                        self._prior_text += head
+                        self._live_msg_id = None
+                    last_sent_body = ""
+                    # Tail must be sent — wake immediately on next loop.
+                    self._dirty.set()
+                    continue
+            except Exception as e:
+                # Don't kill the worker on transient TG/proxy errors; leave
+                # last_sent_body untouched so we retry on next wake-up.
+                print(f"[opencc-renderer] send error: {e}")
+
+            if closed and not self._dirty.is_set():
                 return
-            self._render(body)
-
-    def _render(self, body: str) -> None:
-        # Strategy: keep ONE active edit-target message. When content grows
-        # past MAX_TG_LEN, freeze the current message (move its content to
-        # _prior_text) and start a fresh one.
-        if len(body) <= self.MAX_TG_LEN:
-            self._upsert_live(body)
-            return
-
-        # Overflow: split off the first MAX_TG_LEN as a frozen chunk.
-        head, tail = body[: self.MAX_TG_LEN], body[self.MAX_TG_LEN :]
-        # Finalize current live message with head.
-        self._upsert_live(head)
-        self._live_msg_id = None
-        self._prior_text += head
-        self._text = tail
-        # Tool_lines were already rendered in head; clear so they don't
-        # repeat in the new chunk.
-        self._tool_lines.clear()
-        # Send the tail as a new live message.
-        self._upsert_live(tail)
 
     def _upsert_live(self, text: str) -> None:
         if not text.strip():

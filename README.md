@@ -2,46 +2,44 @@
 
 通过 Telegram 远程控制 Claude Code。
 
-![demo](demo.gif)
-
 ## 功能
 
-- 📱 在 Telegram 上与 Claude 对话
-- 🧠 **长期记忆**：自动保存和召回对话历史
-- 🔄 会话管理（清空、恢复、继续）
-- 📝 代码高亮和格式化回复
-- 🔒 纯 Polling 模式，无需公网暴露
+- 📱 Telegram 上与 Claude 对话，支持代码高亮和格式化回复
+- 🚀 **双模式**：Hook 模式（tmux 多路复用）和 Spawn 模式（OpenCC 子进程流式输出）
+- 📡 **流式推送**：Token 级别实时流式输出，独立 worker 线程避免代理延迟阻塞
+- 🧠 **记忆系统**：SQLite FTS5 自动记忆 + 外部记忆 + 失败记忆
+- 📊 **KV-Cache 优化**：复用 Claude 上下文减少 token 消耗
 
 ## 快速开始
 
 ```bash
-# 1. 安装依赖 (macOS)
+# 1. 安装依赖
 brew install tmux
 
-# 2. 设置 token（从 @BotFather 获取）
+# 2. 配置 token
 export TELEGRAM_BOT_TOKEN="your_token"
 
-# 3. 启动
+# 3. 启动（默认 hook 模式）
 ./matecode.sh start
+
+# 4. 使用 spawn 模式（流式输出）
+./matecode.sh start --backend opencc
 ```
 
 ## 配置
 
-### 1. 创建 Telegram Bot
+### Telegram Bot
 
-在 Telegram 搜索 @BotFather，发送 `/newbot` 创建 bot。
+在 Telegram 搜索 @BotFather，发送 `/newbot` 创建 bot，获取 token。
 
-### 2. 配置 Claude 钩子
+### Hook 模式（默认）
 
 ```bash
 cp hooks/send-to-telegram.sh ~/.claude/hooks/
-# 编辑设置 bot token
-nano ~/.claude/hooks/send-to-telegram.sh
 chmod +x ~/.claude/hooks/send-to-telegram.sh
 ```
 
-添加 hook 到 `~/.claude/settings.json`:
-
+在 `~/.claude/settings.json` 中配置：
 ```json
 {
   "hooks": {
@@ -50,50 +48,70 @@ chmod +x ~/.claude/hooks/send-to-telegram.sh
 }
 ```
 
+### Spawn 模式
+
+无需配置 hook，直接通过 `claude-js` spawn 子进程通信。支持：
+- Token 级流式输出（`--include-partial-messages`）
+- 消息原地编辑（Telegram editMessageText）
+- 自动消息分片（>4000 字符）
+
 ## 命令
-- ./matecode.sh
-- ./tmux-setup.sh
-- tmux source-file ~/.tmux.conf
-- ./bridge_manager stop
 
 ```bash
-./matecode.sh start      # 启动服务
-./matecode.sh stop       # 停止服务
-./matecode.sh restart    # 重启服务
-./matecode.sh status     # 查看状态
-./matecode.sh logs       # 查看日志
+./matecode.sh start       # 启动
+./matecode.sh stop        # 停止
+./matecode.sh restart     # 重启
+./matecode.sh status      # 状态
+./matecode.sh logs        # 日志
 ```
 
-## Telegram Bot 命令
+## Bot 命令
 
 | 命令 | 功能 |
 |------|------|
-| `/status` | 检查 tmux 状态 |
-| `/clear` | 清空对话 |
+| `/status` | 检查会话状态 |
+| `/clear` | 清空会话 |
 | `/continue_` | 继续最近会话 |
-| `/resume` | 选择会话恢复 |
-| `/stop` | 中断 Claude |
-| `/remember <text>` | 保存内容到记忆 |
-| `/recall [query]` | 搜索/查看记忆 |
+| `/resume` | 选择历史会话恢复 |
+| `/stop` | 中断当前生成 |
+| `/remember <text>` | 保存记忆 |
+| `/recall [query]` | 搜索记忆 |
 | `/forget <query/all>` | 删除记忆 |
 
-### 记忆功能
+## 记忆系统
 
-MateCode 内置了基于 SQLite 的本地记忆系统：
+基于 SQLite FTS5 的本地记忆，包含三层：
 
-- **完全自动**：每条消息自动提取关键信息保存到记忆，无需手动触发
-- **智能召回**：发送消息时自动搜索相关历史记忆并注入上下文
-- **隐私安全**：所有数据存储在本地 `~/.matecode/memory.db`，不上传云端
-- **手动管理**：使用 `/remember`、`/recall`、`/forget` 命令管理记忆
+| 模块 | 文件 | 用途 |
+|------|------|------|
+| 自动记忆 | `memory.py` | 自动提取 + 智能召回 |
+| 外部记忆 | `external_memory.py` | 外部知识注入 |
+| 失败记忆 | `failure_memory.py` | 错误模式学习 |
 
-**环境变量配置：**
 ```bash
-export MEMORY_ENABLED=true        # 启用/禁用记忆功能
-export MEMORY_MAX_RESULTS=5       # 每次查询最大记忆数
-export MEMORY_MAX_CONTEXT=2000    # 注入上下文的最大字符数
-export TELEGRAM_RAW_MESSAGES=true # 发送原始消息（不添加系统提示头）
-export KV_CACHE_ENABLED=true      # 启用/禁用 KV-Cache 优化
+export MEMORY_ENABLED=true         # 启用记忆
+export MEMORY_MAX_RESULTS=5        # 最大召回数
+export MEMORY_MAX_CONTEXT=2000     # 上下文最大字符
+export KV_CACHE_ENABLED=true       # KV-Cache 优化
+export TELEGRAM_RAW_MESSAGES=true  # 原始消息模式
 ```
+
+## 技术架构
+
+- **纯标准库**：无外部 Python 依赖
+- **长轮询**：30s 超时 Telegram getUpdates
+- **流式渲染**：独立 worker 线程，节流编辑合并，避免代理延迟（2-5s）阻塞生成
+- **安全**：只向外连接，无需公网暴露
+
+## 文件
+
+| 文件 | 用途 |
+|------|------|
+| `matecode.sh` | 主启动脚本 |
+| `bridge.py` | 消息桥接 + 命令路由 |
+| `opencc_backend.py` | Spawn 模式：OpenCC 子进程 + 流式渲染 |
+| `memory.py` | 自动记忆 (SQLite FTS5) |
+| `kv_cache.py` | KV-Cache 优化 |
 
 ## 常见命令
 
@@ -101,31 +119,7 @@ export KV_CACHE_ENABLED=true      # 启用/禁用 KV-Cache 优化
     tmux source-file ~/.tmux.conf
     claude --dangerously-skip-permissions
     tmux kill-session -t claude
-    # 关闭所有 bridge 相关进程
-    pkill -f "bridge\.py|bridge-polling\.py"
-
-## 技术特点
-
-- **纯标准库**: 无外部 Python 依赖
-- **长轮询**: 30 秒超时，低延迟
-- **实时响应**: 监控 transcript 即时推送
-- **安全**: 只向外连接，不接收入站
-
-## 文件说明
-
-| 文件 | 用途 |
-|------|------|
-| `matecode.sh` | 主启动脚本 |
-| `bridge.py` | 桥接服务器 |
-| `memory.py` | 本地记忆系统 (SQLite FTS5) |
-| `start_bridge.sh` | 单独启动 bridge |
-| `stop_bridge.sh` | 单独停止 bridge |
-| `hooks/send-to-telegram.sh` | Claude Stop 钩子 |
-
-## 最佳实践
-- 退出 cc后 tmux kill-session -t claude 退出 tmux
-- 执行 ./matecode stop 清理环境后再执行./matecode.sh 可以避免一次发送多次回复 以及多个bot切换产生的意外hook失效。
-- alias 指令后方便在其他目录拉起工作环境 例如在 dev0201目录完成当日vibe code。
+    pkill -f "bridge\.py"
 
 ## License
 
