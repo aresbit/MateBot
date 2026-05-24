@@ -15,6 +15,7 @@ import queue
 from memory import get_memory
 from attention_manager import AttentionManager, StablePromptBuilder
 from failure_memory import get_failure_memory
+from opencc_backend import OpenccSession, TelegramStreamRenderer, DEFAULT_CLI_PATH
 
 
 class Config:
@@ -41,6 +42,32 @@ class Config:
 
     # Telegram settings - disable attention manager for raw messages
     TELEGRAM_RAW_MESSAGES = os.environ.get("TELEGRAM_RAW_MESSAGES", "true").lower() == "true"
+
+    # Delivery mode:
+    #   HOOK_DELIVERY_ENABLED=true (default) — the Claude Code Stop hook
+    #   (hooks/send-to-telegram.sh) owns TG delivery. The polling-based
+    #   ResponseMonitor only saves memory and tracks state; it does NOT call
+    #   reply() or remove the pending file. This eliminates the race where
+    #   polling sent partial output and deleted the pending file before Stop
+    #   fired, causing the hook to bail out.
+    #
+    #   HOOK_DELIVERY_ENABLED=false — legacy behavior: polling sends to TG.
+    HOOK_DELIVERY_ENABLED = os.environ.get("HOOK_DELIVERY_ENABLED", "true").lower() == "true"
+
+    # OpenCC spawn mode: bypass tmux entirely and spawn vendor/opencc/cli.js
+    # (reverse-engineered Claude CLI) with stream-json I/O. Enables true
+    # event-driven streaming intermediate feedback to Telegram via
+    # editMessageText. When enabled:
+    #   - MessageQueue routes user messages to a persistent OpenccSession
+    #     instead of tmux_send.
+    #   - ResponseMonitor (transcript polling) is bypassed for chats served by
+    #     spawn; the Stop hook is also bypassed (no pending file written).
+    #   - One subprocess per chat_id, resumed across messages via --resume.
+    OPENCC_SPAWN_MODE = os.environ.get("OPENCC_SPAWN_MODE", "false").lower() == "true"
+    OPENCC_CLI_PATH = os.environ.get("OPENCC_CLI_PATH", str(DEFAULT_CLI_PATH))
+    OPENCC_BUN_PATH = os.environ.get("OPENCC_BUN_PATH", "bun")
+    OPENCC_MODEL = os.environ.get("OPENCC_MODEL", "")  # "" = CLI default
+    OPENCC_CWD = os.environ.get("OPENCC_CWD", os.getcwd())
 
     # Bot commands
     BOT_COMMANDS = [
@@ -126,6 +153,24 @@ def tmux_send_escape() -> None:
 def send_typing_loop(chat_id: int) -> None:
     """Send typing action in a loop."""
     while os.path.exists(Config.PENDING_FILE):
+        TelegramAPI.send_typing(chat_id)
+        time.sleep(5)
+
+
+def send_typing_loop_until(chat_id: int, done_predicate) -> None:
+    """Like send_typing_loop, but stops when done_predicate() returns truthy.
+
+    Used in OPENCC_SPAWN_MODE where there is no pending file — the renderer's
+    `_closed` flag is the natural completion signal.
+    """
+    # Hard cap so a stuck process can't leak typing actions forever.
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        try:
+            if done_predicate():
+                return
+        except Exception:
+            return
         TelegramAPI.send_typing(chat_id)
         time.sleep(5)
 
@@ -785,20 +830,26 @@ class ResponseMonitor:
         # Skip empty responses (e.g., when only XML observations were present)
         if not cleaned_responses or not cleaned_responses.strip():
             print(f"[DEBUG] Skipping empty response for chat {chat_id}")
-            # 空响应也清理pending文件，避免卡住
-            if os.path.exists(Config.PENDING_FILE):
+            # 仅在 legacy 模式下清理 pending；hook 模式由 Stop hook 自行处理
+            if not Config.HOOK_DELIVERY_ENABLED and os.path.exists(Config.PENDING_FILE):
                 os.remove(Config.PENDING_FILE)
                 print(f"[DEBUG] Pending file removed for empty response")
             return
 
-        # 先保存到内存，再发送消息
+        # 先保存到内存
         self._save_to_memory(chat_id, cleaned_responses, memory_update)
 
-        # 发送消息到Telegram
+        if Config.HOOK_DELIVERY_ENABLED:
+            # Stop hook (hooks/send-to-telegram.sh) 负责实际发送和清理 pending
+            # 文件。轮询在这里只是顺手做记忆持久化，不再向 TG 写消息，避免与
+            # hook 抢发、导致 hook 因 pending 已删而 bail。
+            print(f"[DEBUG] Hook delivery enabled — skipping TG send from polling")
+            return
+
+        # Legacy path: polling 自己发送（仅在 HOOK_DELIVERY_ENABLED=false 时启用）
         result = reply(chat_id, cleaned_responses)
         if result is not False:
             print(f"[DEBUG] Response sent to chat {chat_id}")
-            # 只有在成功发送响应后才移除pending文件
             if os.path.exists(Config.PENDING_FILE):
                 os.remove(Config.PENDING_FILE)
                 print(f"[DEBUG] Pending file removed after sending response")
@@ -881,6 +932,92 @@ class ResponseMonitor:
 response_monitor = ResponseMonitor(check_interval=0.1)  # Faster response check
 
 
+class OpenccSessionRegistry:
+    """One persistent claude-js (OpenCC) process per chat, with streaming TG render."""
+
+    def __init__(self):
+        self._sessions: Dict[str, OpenccSession] = {}
+        self._renderers: Dict[str, TelegramStreamRenderer] = {}
+        self._lock = threading.Lock()
+
+    def get_or_create(self, chat_id: int) -> tuple[OpenccSession, TelegramStreamRenderer]:
+        key = str(chat_id)
+        with self._lock:
+            sess = self._sessions.get(key)
+            rend = self._renderers.get(key)
+            if sess and sess.is_running and rend is not None:
+                return sess, rend
+
+            # New renderer for each session (fresh state).
+            rend = TelegramStreamRenderer(chat_id, telegram_api=TelegramAPI.call)
+
+            sess = OpenccSession(
+                on_event=rend.on_event,
+                on_stderr=lambda l: print(f"[opencc:{key}] {l}"),
+                on_close=lambda c: print(f"[opencc:{key}] process closed code={c}"),
+                cli_path=Path(Config.OPENCC_CLI_PATH),
+                bun_path=Config.OPENCC_BUN_PATH,
+                cwd=Config.OPENCC_CWD,
+                model=(Config.OPENCC_MODEL or None),
+            )
+            self._sessions[key] = sess
+            self._renderers[key] = rend
+            return sess, rend
+
+    def new_turn(self, chat_id: int) -> tuple[OpenccSession, TelegramStreamRenderer]:
+        """Reset the renderer (start a fresh edit-target message) but keep
+        the underlying process alive so conversation state persists."""
+        key = str(chat_id)
+        with self._lock:
+            sess = self._sessions.get(key)
+            if sess is None or not sess.is_running:
+                # Force a full create.
+                pass
+            rend = TelegramStreamRenderer(chat_id, telegram_api=TelegramAPI.call)
+            self._renderers[key] = rend
+            if sess is None or not sess.is_running:
+                sess = OpenccSession(
+                    on_event=rend.on_event,
+                    on_stderr=lambda l: print(f"[opencc:{key}] {l}"),
+                    on_close=lambda c: print(f"[opencc:{key}] process closed code={c}"),
+                    cli_path=Path(Config.OPENCC_CLI_PATH),
+                    bun_path=Config.OPENCC_BUN_PATH,
+                    cwd=Config.OPENCC_CWD,
+                    model=(Config.OPENCC_MODEL or None),
+                )
+                self._sessions[key] = sess
+            else:
+                # Rebind on_event to the new renderer.
+                sess.on_event = rend.on_event
+            return sess, rend
+
+    def interrupt(self, chat_id: int) -> bool:
+        key = str(chat_id)
+        with self._lock:
+            sess = self._sessions.get(key)
+        if sess and sess.is_running:
+            sess.send_interrupt()
+            return True
+        return False
+
+    def close(self, chat_id: int) -> None:
+        key = str(chat_id)
+        with self._lock:
+            sess = self._sessions.pop(key, None)
+            self._renderers.pop(key, None)
+        if sess:
+            sess.close()
+
+    def close_all(self) -> None:
+        with self._lock:
+            keys = list(self._sessions.keys())
+        for k in keys:
+            self.close(int(k) if k.lstrip("-").isdigit() else k)
+
+
+opencc_registry = OpenccSessionRegistry()
+
+
 class MessageQueue:
     """Ensure messages are processed in order."""
 
@@ -929,6 +1066,18 @@ class MessageQueue:
             # 存储消息用于跟踪和记忆
             recent_messages[str(chat_id)] = text
             recent_full_prompts[str(chat_id)] = full_prompt
+
+            # OpenCC spawn 路径：直接 stream-json，不走 tmux/transcript/hook
+            if Config.OPENCC_SPAWN_MODE:
+                sess, rend = opencc_registry.new_turn(chat_id)
+                threading.Thread(
+                    target=send_typing_loop_until,
+                    args=(chat_id, lambda: rend._closed),
+                    daemon=True,
+                ).start()
+                sess.send(full_prompt)
+                print(f"[DEBUG] Routed chat={chat_id} via opencc spawn (model={Config.OPENCC_MODEL or 'default'})")
+                return
 
             # 确保目录存在
             Config.PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1219,6 +1368,11 @@ class BotHandler:
 
     def _cmd_stop(self, chat_id, _):
         """Stop/interrupt Claude and send any partial response."""
+        if Config.OPENCC_SPAWN_MODE:
+            interrupted = opencc_registry.interrupt(chat_id)
+            reply(chat_id, "Interrupted (opencc)" if interrupted else "No active session")
+            return
+
         # First, check if there's already a response generated
         # and send it before interrupting
         if os.path.exists(Config.PENDING_FILE):
@@ -1248,6 +1402,14 @@ class BotHandler:
         reply(chat_id, "Interrupted")
 
     def _cmd_clear(self, chat_id, _):
+        if Config.OPENCC_SPAWN_MODE:
+            # Close the persistent process; next message will start a fresh
+            # session (no --resume).
+            opencc_registry.close(chat_id)
+            self._session_initialized = False
+            reply(chat_id, "Cleared (opencc session reset)")
+            return
+
         if not self._require_tmux(chat_id):
             return
         self._session_initialized = False
