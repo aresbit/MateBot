@@ -30,6 +30,7 @@ class Config:
     PENDING_FILE = CLAUDE_DIR / "telegram_pending"
     HISTORY_FILE = CLAUDE_DIR / "history.jsonl"
     UPDATE_OFFSET_FILE = CLAUDE_DIR / "telegram_offset"
+    SENT_OFFSET_FILE = CLAUDE_DIR / "telegram_sent_offset"
 
     # Memory settings
     MEMORY_ENABLED = os.environ.get("MEMORY_ENABLED", "true").lower() == "true"
@@ -629,6 +630,7 @@ class ResponseMonitor:
         self._checking = False
         self._seen_message_ids = set()  # Track processed message IDs for current file
         self._file_states = {}  # Track read positions per transcript file: {path: {'position': int, 'seen_ids': set}}
+        self._cumulative_sent = {}  # Per-transcript cumulative sent char count for hook dedup
 
     def start(self):
         """Start the response monitor with file watching."""
@@ -840,10 +842,18 @@ class ResponseMonitor:
         self._save_to_memory(chat_id, cleaned_responses, memory_update)
 
         if Config.HOOK_DELIVERY_ENABLED:
-            # Stop hook (hooks/send-to-telegram.sh) 负责实际发送和清理 pending
-            # 文件。轮询在这里只是顺手做记忆持久化，不再向 TG 写消息，避免与
-            # hook 抢发、导致 hook 因 pending 已删而 bail。
-            print(f"[DEBUG] Hook delivery enabled — skipping TG send from polling")
+            # Stream intermediate responses to Telegram even in hook mode.
+            # This gives the user real-time feedback instead of waiting for
+            # the Stop hook to fire at the very end.  The Stop hook still
+            # handles final cleanup (pending file deletion) and sends any
+            # remaining delta via the sent_offset file.
+            result = reply(chat_id, cleaned_responses)
+            if result is not False:
+                print(f"[DEBUG] Streamed to chat {chat_id} (hook mode, {len(cleaned_responses)} chars)")
+                self._update_sent_offset(transcript_path, cleaned_responses)
+            else:
+                print(f"[DEBUG] Failed to stream, keeping pending for hook")
+            # Never delete pending file here — the Stop hook owns cleanup
             return
 
         # Legacy path: polling 自己发送（仅在 HOOK_DELIVERY_ENABLED=false 时启用）
@@ -927,6 +937,20 @@ class ResponseMonitor:
 
         except Exception as e:
             print(f"Error recording failure: {e}")
+
+    def _update_sent_offset(self, transcript_path, new_chunk):
+        """Track cumulative sent chars per transcript for Stop hook dedup."""
+        key = str(transcript_path)
+        prev = self._cumulative_sent.get(key, 0)
+        self._cumulative_sent[key] = prev + len(new_chunk)
+        try:
+            Config.SENT_OFFSET_FILE.write_text(json.dumps({
+                "transcript": key,
+                "sent_chars": self._cumulative_sent[key],
+                "ts": int(time.time()),
+            }))
+        except Exception as e:
+            print(f"[DEBUG] sent_offset save error: {e}")
 
 
 response_monitor = ResponseMonitor(check_interval=0.1)  # Faster response check

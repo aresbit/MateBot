@@ -95,7 +95,7 @@ start() {
 
     # 启动新实例
     cd "$SCRIPT_DIR" || exit 1
-    nohup python3 "$BRIDGE_SCRIPT" > "$LOGFILE" 2>&1 &
+    nohup python3 -u "$BRIDGE_SCRIPT" > "$LOGFILE" 2>&1 &
     local new_pid=$!
     echo "$new_pid" > "$PIDFILE"
 
